@@ -3,10 +3,10 @@
 import time
 
 import numpy as np
-
-from robocurate.curation.policy import MLPPolicy, train_bc
 from toybed.demos import flatten, make_dataset, rollout_demo, success_rate
 from toybed.env import PointReachEnv, expert_action, goal_distance_progress
+
+from robocurate.curation.policy import MLPPolicy, train_bc
 
 EVAL = range(900000, 900100)  # toy env seeds, unrelated to protocol seeds
 
