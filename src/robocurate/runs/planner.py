@@ -165,12 +165,24 @@ def check_result_design(plan: Plan) -> None:
                               f"K >= {RESULT_MIN_SUBSETS}")
 
 
+def check_entrants_enabled(grid: GridConfig) -> None:
+    """Disabled entrants (status != "active", e.g. failed toybed sanity) cannot appear in any grid."""
+    from robocurate.cleaners.registry import disabled_reason
+
+    for c in grid.condition_specs():
+        if c.kind in ("cleaner", "weighting"):
+            why = disabled_reason(c.name)
+            if why:
+                raise ConfigError(f"entrant {c.name!r} is {why}; it cannot be used in a grid")
+
+
 def make_plan(
     grid_path: str,
     mode: str = "plan",
     train_seeds_override: list[int] | None = None,
 ) -> Plan:
     grid = load_grid(grid_path, mode=mode)
+    check_entrants_enabled(grid)
     protocol = load_protocol(resolve_config_path(grid.protocol), mode=mode)
     task = load_task(resolve_config_path(grid.task), mode=mode)
     notes = []

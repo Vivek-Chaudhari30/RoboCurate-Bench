@@ -56,6 +56,15 @@ def available() -> list[str]:
     return sorted(set(BUILTINS) | set(ENTRANTS) | set(plugin_entry_points()))
 
 
+def disabled_reason(name: str) -> str | None:
+    """The status string of a disabled registered entrant (e.g. failed its toybed sanity check), else None."""
+    try:
+        st = getattr(get(name), "status", "active")
+    except Exception:  # unknown names are handled by the caller's own lookup
+        return None
+    return None if st == "active" else st
+
+
 def _load_entrant(target: str):
     import importlib
 

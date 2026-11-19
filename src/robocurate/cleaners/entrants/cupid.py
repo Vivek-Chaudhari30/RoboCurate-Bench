@@ -66,6 +66,13 @@ def per_sample_projected_grads(policy: nn.Module, states: np.ndarray, actions: n
     return torch.cat(out) if out else torch.zeros(0, P.shape[1])
 
 
+def performance_influence(train_feats: torch.Tensor, target_sum: torch.Tensor, H: torch.Tensor) -> torch.Tensor:
+    """Per-training-sample performance influence (Eq. 2-3): score_z = phi_z^T H^+ u, with u = sum_tau R(tau)
+    sum_{(s',a')} phi(s', a'). Positive = upweighting z raises sum R log pi(a'|s'). H^+ = pseudo-inverse
+    (lambda_reg = 0, App. A.2)."""
+    return train_feats @ (torch.linalg.pinv(H.double()).float() @ target_sum)
+
+
 class StochasticPolicy:
     """a ~ N(mu(s), sigma^2 I) for rollouts (see module docstring)."""
 
@@ -82,6 +89,8 @@ class Cupid(ScoreCleaner):
     requires_rollouts = N_ROLLOUTS
     requires_reference_policy = True
     implementation = "reimplementation"
+    # Toybed sanity failure investigated (PROGRESS.md "CUPID sanity investigation"); outcome (c): unresolved.
+    status = "disabled — failed sanity"
     source = ("Agia et al. 2025, arXiv 2506.19121v2 Def. 1, Eqs. 2-5, App. A; ref code (MIT) "
               "github.com/agiachris/cupid@2941eba")
 
@@ -100,7 +109,6 @@ class Cupid(ScoreCleaner):
         sigma = float(resid.pow(2).mean().sqrt())
         phi = per_sample_projected_grads(policy, S, A, P)  # (N, d)
         H = phi.T @ phi + LAMBDA_REG * torch.eye(PROJ_DIM)
-        Hinv = torch.linalg.pinv(H.double()).float()
         n = min(N_ROLLOUTS, ctx.rollouts.remaining)
         res = ctx.rollouts.rollout(StochasticPolicy(policy, sigma, seed), ctx.rollouts.next_seeds(n))
         u = torch.zeros(PROJ_DIM)
@@ -109,8 +117,7 @@ class Cupid(ScoreCleaner):
                 continue
             gt = per_sample_projected_grads(policy, r.states, r.actions, P).sum(0)
             u += (1.0 if r.success else -1.0) * gt
-        w = Hinv @ u  # (d,)
-        per_frame = (phi @ w).numpy()
+        per_frame = performance_influence(phi, u, H).numpy()
         bounds = np.cumsum([0] + [e.length for e in eps])
         self._psi = {e.episode_index: float(per_frame[bounds[j]:bounds[j + 1]].sum()) for j, e in enumerate(eps)}
         self.diagnostics = {"sigma": sigma, "n_rollouts": len(res), "n_success": int(sum(r.success for r in res))}

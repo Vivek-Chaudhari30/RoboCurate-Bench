@@ -40,6 +40,8 @@ class Cleaner(ABC):
     requires_gpu: bool = False
     implementation: str = "original"  # original | wrapped | reimplementation
     source: str = ""  # citation, paper section or repo@commit
+    # "active", or "disabled — <reason>": disabled entrants are refused in grids and excluded from the leaderboard
+    status: str = "active"
     context: Any = None  # curation.context.CurationContext, set by the prepare stage
 
     @abstractmethod
@@ -52,7 +54,7 @@ class Cleaner(ABC):
 
     def metadata(self) -> dict[str, Any]:
         return {"name": self.name, "version": self.version, "implementation": self.implementation,
-                "source": self.source, **self.resources()}
+                "source": self.source, "status": self.status, **self.resources()}
 
 
 class WeightingCleaner(Cleaner):

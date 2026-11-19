@@ -62,6 +62,12 @@ def _consistency(recs: list[dict]) -> list[str]:
     return issues
 
 
+def _disabled(name: str) -> str | None:
+    from robocurate.cleaners.registry import disabled_reason
+
+    return disabled_reason(name)
+
+
 def cell_id(task: str, budget: float, label: str) -> str:
     """Stable id of one leaderboard cell (task x budget x condition), used by `robocurate reproduce`."""
     import hashlib
@@ -170,6 +176,10 @@ def analyze(recs: list[dict], alpha: float = 0.05, n_boot: int = 10_000) -> dict
             if n_subsets >= 2:
                 rate = {k: [r["success_rate"] for r in v] for k, v in groups.items()}
                 cleaners = {k: v for k, v in rate.items() if k.startswith("cleaner:")}
+                for k in [k for k in cleaners if _disabled(k.split(":", 1)[1])]:
+                    issues.append(f"{k} excluded: entrant is {_disabled(k.split(':', 1)[1])}")
+                    del cleaners[k]
+                    conditions = [c for c in conditions if c["condition"] != k]
                 refsin = {k: (rate[k], k != "full") for k in ("oracle", "full") if k in rate}
                 costs = {c["condition"]: c["curation_gpu_h"] for c in conditions}
                 try:
@@ -181,6 +191,9 @@ def analyze(recs: list[dict], alpha: float = 0.05, n_boot: int = 10_000) -> dict
                                      "cleaner_vs_placebo": comps, "reference_vs_placebo": refs, "mde": mde_v})
         # weighting track (D-020): entrant vs its own permuted-weights placebo; unweighted full data as reference
         wnames = sorted({r["spec"]["condition"]["name"] for r in trs if kind_of(r) == "weighting"})
+        for n in [n for n in wnames if _disabled(n)]:
+            tinfo["issues"].append(f"weighting:{n} excluded: entrant is {_disabled(n)}")
+        wnames = [n for n in wnames if not _disabled(n)]
         if wnames:
             ent, plac, issues, conds = {}, {}, [], []
             for n in wnames:

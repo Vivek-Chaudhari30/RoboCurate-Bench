@@ -259,6 +259,47 @@ re-executed: MATCH 3/3
 Oracle (reference, D-026 test): +0.197, p = 0.0068, significant. length_heuristic: −0.003, p_holm 0.957, not
 significant. rabc vs its 8 permutations: +0.017, p_holm 0.664. Full vs placebo: not significant. Reproduce MATCH 3/3.
 
+## CUPID sanity investigation (Step 6 of the D-026 task) — outcome (c): unresolved, entrant disabled
+
+Timebox 3 h; used ~1.2 h (CPU only). No hyperparameter of the entrant was changed. Diagnostics:
+`scripts/diagnostics/cupid/{diag,premise,m_sweep,rank}.py` (some vary d or m as DIAGNOSTICS only; the entrant keeps
+d = 4000, lambda = 0, m = 100).
+
+- *Official code.* github.com/agiachris/cupid@2941eba9 exists but is built into the Diffusion Policy codebase on
+  the `trak` library (not installed; not an approved dependency), so it was not run. Its TRAK files were read
+  instead (raw GitHub, read-only): `scripts/train/train_trak.sh:309,311,315-316` (proj_dim 4000, lambda_reg 0.0,
+  `loss_fn="square"` with `"ddpm"` commented out, num_timesteps 64); `diffusion_policy/data_attribution/
+  modelout_functions.py:111-136` ("ddpm" = mse(pred, target); "square" = mean(pred^2) of the denoiser output;
+  `get_out_to_loss_grad` = 1).
+- *Divergence found.* Our docstring said the model output is "the per-sample BC loss (our reading of 'square')".
+  That reading was wrong: "square" is the squared network prediction, not the loss. So our H = Phi^T Phi of LOSS
+  gradients is an empirical Fisher (each sample weighted by its squared residual), not the reference's features.
+  For a non-diffusion (MLP) policy the "square" analogue f = mean(mu(s)^2) ignores the action labels entirely
+  (the denoiser sees the noisy action as input; an MLP mu(s) does not), so it cannot be ported faithfully to our
+  toybed policy class.
+- *Formula check.* New unit test `test_cupid_influence_matches_leave_one_out_refit`: with the exact Hessian, our
+  influence (per-sample grads from `per_sample_projected_grads`, Eq. 2 sign, Eq. 3 "net" aggregation, factored out
+  as `performance_influence`) predicts brute-force leave-one-out refits of a linear least-squares policy
+  (corr > 0.99, sign agreement > 95%). The per-sample gradient test (vs autograd) already passed.
+- *Premise holds on the toybed.* BC success over 300 toy seeds (3 train seeds): all data 0.39/0.43/0.40; without
+  the 8 wrong-direction demos 0.75/0.83/0.77; clean only 1.0. The wrong demos are strongly harmful.
+- *Influence does not find them under any variant* (50 demos, 800 frames, 100 rollouts, 41 successes; fraction of
+  wrong vs clean demos kept at a 50% budget): ours (empirical Fisher, d = 4000) 0.625 vs 0.467; same, no
+  projection 0.625 vs 0.5; EXACT Hessian of the training loss 0.625 vs 0.5; Gauss-Newton on mu(s) 0.625 vs 0.5;
+  official "square" analogue 0.5 vs 0.533 (passes `wrong < clean` only by noise; its features ignore actions).
+- *Not rollout variance.* m = 100 / 1000 / 4000 (3 reps each): AUC P(wrong ranked below clean) 0.65/0.47/0.42,
+  0.60/0.64/0.53, 0.53/0.47/0.60 — no trend to 1.
+- *Rank of Phi^T Phi.* N = 800 frames < d = 4000 (rank-deficient, pinv with lambda = 0). Diagnostic d = 400:
+  wrong 0.375 vs clean 0.567 (AUC 0.667); 10x toybed (N ~ 7900 > d): AUC 0.49 / 0.55, but there 98–100 of 100
+  rollouts succeed, so the +-1 contrast vanishes. Inconclusive.
+- *Outcome (c).* Not a bug in the influence formula (LOO test), not a TRAK-approximation artifact (exact Hessian
+  fails too), not rollout count; a toybed variant that satisfies CUPID's assumptions would need a diffusion policy
+  (the "square" output depends on it), which does not fit the timebox. `Cupid.status = "disabled — failed sanity"`;
+  `make_plan` refuses disabled entrants in any grid; `robocurate report` drops disabled entrants with an issue
+  (tests `test_disabled_entrant_refused_in_grids_and_excluded_from_report`). It is not listed under CUPID's name.
+- *Next step if wanted.* (b): a toy diffusion policy (DDPM loss, the reference "square" output, Q = 1) on the
+  toybed, then require the sanity pass there.
+
 ## Blocked
 
 - **B-006 (2026-11-19T15:10Z, OPEN) — no scratch path on hokkaido; Step 2 outcome (c), Step 3 skipped.**

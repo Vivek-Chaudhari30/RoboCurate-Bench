@@ -101,7 +101,8 @@ def test_sanity_deminf(toy):
 
 
 @pytest.mark.xfail(strict=True, reason="CUPID with published defaults (d=4000, lambda=0, 100 rollouts) does not "
-                   "down-rank the planted wrong-direction toy demos; reported, not tuned (PROGRESS.md)")
+                   "down-rank the planted wrong-direction toy demos; investigated, outcome (c): disabled, not tuned "
+                   "(PROGRESS.md)")
 def test_sanity_cupid(toy):
     _, frac = _kept("cupid", toy)
     assert frac["wrong"] < frac["clean"]
@@ -238,3 +239,52 @@ def test_entrant_passes_submit_conformance(name):
 def test_deminf_passes_submit_conformance():
     rep = conformance.check("deminf", synthetic_view(12), time_limit_s=900)
     assert rep.passed, rep.lines()
+
+
+def test_cupid_influence_matches_leave_one_out_refit():
+    """CUPID's influence formula (per-sample grads from `per_sample_projected_grads` with identity projection,
+    score_z = grad l_z^T H^-1 u, u = sum_tau R(tau) sum grad l(s', a')) against brute-force leave-one-out refits
+    of a linear least-squares policy with the EXACT Hessian. Upweighting z changes the target
+    T = sum R log pi(a'|s') = -sum R l(s', a') by +score_z (Eq. 2 sign), so removing z changes it by ~ -score_z."""
+    from torch.func import functional_call, hessian
+
+    from robocurate.cleaners.entrants.cupid import per_sample_projected_grads, performance_influence
+
+    class Lin(torch.nn.Module):
+        def __init__(self, W):
+            super().__init__()
+            self.W = torch.nn.Parameter(torch.as_tensor(W, dtype=torch.float32))
+
+        def forward(self, s):
+            return s @ self.W
+
+        def loss(self, b):
+            return ((self(b["observation.state"]) - b["action"]) ** 2).mean(-1).mean()
+
+    rng = np.random.default_rng(0)
+    N, ds, da = 200, 3, 2
+    X = rng.normal(size=(N, ds))
+    Wt = rng.normal(size=(ds, da))
+    Y = X @ Wt + 0.3 * rng.normal(size=(N, da))
+    Y[:5] += 3.0  # a few corrupted labels
+    fit = lambda idx: np.linalg.lstsq(X[idx], Y[idx], rcond=None)[0]  # noqa: E731  minimizes the sum loss exactly
+    W = fit(np.arange(N))
+    pol = Lin(W)
+    Xs = rng.normal(size=(60, ds))  # "rollout" states with sampled actions and +-1 returns
+    As = Xs @ Wt + 0.3 * rng.normal(size=(60, da))
+    R = np.where(rng.uniform(size=60) < 0.5, 1.0, -1.0)
+    eye = torch.eye(ds * da)
+    G = per_sample_projected_grads(pol, X.astype(np.float32), Y.astype(np.float32), eye)
+    Gr = per_sample_projected_grads(pol, Xs.astype(np.float32), As.astype(np.float32), eye)
+    u = (torch.as_tensor(R, dtype=torch.float32)[:, None] * Gr).sum(0)
+    params = {k: v.detach() for k, v in pol.named_parameters()}
+    St, At = torch.as_tensor(X, dtype=torch.float32), torch.as_tensor(Y, dtype=torch.float32)
+    H = hessian(lambda p: ((functional_call(pol, p, (St,)) - At) ** 2).mean(-1).sum())(params)["W"]["W"]
+    score = performance_influence(G, u, H.reshape(ds * da, ds * da)).numpy()
+
+    def T(Wm):
+        return float(-(R * ((Xs @ Wm - As) ** 2).mean(-1)).sum())
+
+    loo = np.array([T(fit(np.delete(np.arange(N), z))) - T(W) for z in range(N)])
+    assert np.corrcoef(loo, -score)[0, 1] > 0.99
+    assert np.mean(np.sign(loo) == np.sign(-score)) > 0.95

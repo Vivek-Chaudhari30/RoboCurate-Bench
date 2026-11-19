@@ -282,3 +282,28 @@ def test_reproduce_fake_cell(tmp_path, scratch_env, capsys):
         assert f"MATCH {n}/{n}" in o and "robocurate run" in o and "robocurate prepare" in o
         assert "  pytest " not in o  # regression: in-process calls recorded the caller's sys.argv
     assert cli.main(["reproduce", "000000000000", "--results-dir", str(out)]) == 2
+
+
+def test_disabled_entrant_refused_in_grids_and_excluded_from_report(tmp_path, scratch_env, monkeypatch, capsys):
+    """CUPID failed its toybed sanity (outcome c): status "disabled — failed sanity"; grids refuse it and the
+    report drops any disabled entrant with an issue instead of listing it under its name."""
+    from robocurate.cleaners import registry
+    from robocurate.config import ConfigError
+    from robocurate.runs.planner import make_plan
+
+    assert registry.get("cupid").metadata()["status"] == "disabled — failed sanity"
+    assert registry.disabled_reason("cupid") == "disabled — failed sanity"
+    assert registry.disabled_reason("length_heuristic") is None
+    cfg = write_configs(tmp_path / "cfgc")
+    g = cfg["grid"].read_text().replace("name: length_heuristic", "name: cupid")
+    cfg["grid"].write_text(g)
+    with pytest.raises(ConfigError, match="disabled — failed sanity"):
+        make_plan(str(cfg["grid"]))
+    assert cli.main(["plan", str(cfg["grid"])]) == 2
+
+    out = _fake_e2e(tmp_path, scratch_env, oracle=0.25, length=0.0)
+    monkeypatch.setattr(R, "_disabled", lambda n: "disabled — test" if n == "length_heuristic" else None)
+    a = R.analyze(results.load_dir(out), n_boot=200)
+    b = a["tasks"][0]["budgets"][0]
+    assert not b["cleaner_vs_placebo"] and all(c["condition"] != "cleaner:length_heuristic" for c in b["conditions"])
+    assert any("cleaner:length_heuristic excluded: entrant is disabled — test" in i for i in b["issues"])

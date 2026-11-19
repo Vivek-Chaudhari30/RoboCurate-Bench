@@ -61,7 +61,7 @@ Entrants:
 | `rabc` | weighting | wrapped (LeRobot RA-BC) |
 | `demo_score` | selection | reimplementation |
 | `deminf` | selection | reimplementation |
-| `cupid` | selection | reimplementation |
+| `cupid` | selection | reimplementation — **disabled (failed toybed sanity)**; refused in grids, excluded from the leaderboard |
 | `rcb_score` | selection | ours, v1 frozen |
 
 Baselines are random subsets, full data and the oracle.
@@ -100,7 +100,7 @@ To submit your own cleaner, see [docs/submit.md](docs/submit.md).
   - trajlens and retake are not adapted (dependency conflicts / external API use).
   - lerobot-doctor reports at most 20 flagged episodes.
 - **Reimplementations.** CUPID, DemInf and Demo-SCORE are reimplementations with declared adaptations. CUPID does
-  not pass its toy sanity check with published defaults.
+  not pass its toy sanity check with published defaults; it is disabled (see PROGRESS.md, CUPID sanity investigation).
 
 ## Credits
 
