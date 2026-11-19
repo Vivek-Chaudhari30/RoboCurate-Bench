@@ -36,11 +36,41 @@ def test_real_configs_load():
     Recipe.load(REPO / "configs/mixtures/task_a_v0.yaml")
 
 
-def test_result_mode_refuses_without_frozen_or_with_tbd(scratch_env, capsys):
+def test_result_mode_refuses_without_frozen_or_with_tbd(scratch_env, tmp_path, capsys):
+    from helpers import PROTOCOL
+
+    proto = PROTOCOL.replace("[2000, 2001, 2002]", str(list(range(2000, 2008))))
+    cfg = write_configs(tmp_path / "cfg", protocol=proto)
+    g = cfg["grid"].read_text().replace("n_subsets: 3", "n_subsets: 8")  # passes the D-019 K check
+    cfg["grid"].write_text(g)
+    rc = cli.main(["run", str(cfg["grid"]), "--backend", "local"])
+    assert rc == 2
+    err = capsys.readouterr().err
+    assert ("FROZEN" in err or "TBD" in err) and "D-019" not in err
+
+
+def test_result_mode_refuses_k_below_8(scratch_env, capsys):
+    """D-019: result-mode runs need >= 8 random subsets; the launch grid has K = 3."""
     rc = cli.main(["run", str(REPO / "configs/grids/task_a_v0.yaml"), "--backend", "local"])
     assert rc == 2
     err = capsys.readouterr().err
-    assert "FROZEN" in err or "TBD" in err
+    assert "D-019" in err and "K >= 8" in err
+
+
+def test_check_result_subsets_unit(tmp_path):
+    from robocurate.config import ConfigError, check_result_subsets, load_grid
+
+    def grid(k):
+        f = tmp_path / f"g{k}.yaml"
+        f.write_text(f"name: g\ntask: t.yaml\nprotocol: p.yaml\nbudgets: [0.5]\nconditions:\n"
+                     f"  - {{kind: full}}\n  - {{kind: random, n_subsets: {k}}}\n")
+        return load_grid(f)
+
+    check_result_subsets(grid(8))
+    check_result_subsets(grid(12))
+    for k in (3, 4, 7):
+        with pytest.raises(ConfigError, match="D-019"):
+            check_result_subsets(grid(k))
 
 
 def test_local_backend_refuses_on_cpu(scratch_env, monkeypatch, capsys):

@@ -264,7 +264,7 @@ def test_subset_test_vectorized_matches_scalar():
         out, _ = S.compare_cleaners_d016({f"c{j}": cl[i, j] for j in range(5)}, list(pl[i]), n_boot=10)
         for j, o in enumerate(out):
             assert o.p_raw == pytest.approx(p[i, j], abs=1e-12)
-            assert o.df == pytest.approx(df[i, j])
+            assert o.df == df[i, j] == 3  # D-019: df = K - 1
 
 
 def test_subset_test_unbalanced_and_full_reference():
@@ -298,23 +298,19 @@ def test_design_runs():
 
 
 @pytest.mark.slow
-def test_d016_null_grid_runs_and_reports():
-    """Part 1 grid (informational while B-002 is open): asserts only that it runs and is well formed.
+def test_primary_test_null_calibration():
+    """Hard two-tier null calibration of the primary test (D-016 + D-019), 7 null cleaners, 200 rollouts.
 
-    The as-specified D-016 test exceeds FWER 0.07 at K=4 (see PROGRESS.md B-002); the pass condition will be
-    asserted once the protocol owner picks the fix.
+    Tier 1: every cell FWER <= 0.07. Tier 2: K >= 8 cells, upper 95% Monte Carlo bound <= 0.06
+    (200 000 grids per K >= 8 cell, MC SE <= 0.0006). The table is printed with MC SEs (pytest -s).
     """
-    import importlib.util
+    from robocurate.report.simulate import grid, markdown
 
-    from robocurate.paths import repo_root
-
-    spec = importlib.util.spec_from_file_location("g", repo_root() / "scripts/d016_null_grid.py")
-    g = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(g)
-    rows = g.grid(4000)
-    assert len(rows) == 24
-    for r in rows:
-        assert 0 <= r["fwer"]["spec"] <= 1 and 0 <= r["power15"]["spec"] <= 1
+    cells = grid(power=False)
+    print("\n" + markdown(cells))
+    tier1 = [c for c in cells if c.fwer > 0.07]
+    tier2 = [c for c in cells if c.K >= 8 and c.upper95 > 0.06]
+    assert not tier1 and not tier2, f"tier1 fails: {tier1}; tier2 fails: {tier2}"
 
 
 def test_power_large_noncentrality_regression():

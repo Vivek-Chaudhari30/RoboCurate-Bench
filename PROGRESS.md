@@ -1,10 +1,58 @@
 # PROGRESS
 
-**Current milestone: M0 — BLOCKED at Part 1 (B-002: D-016 test fails null calibration at K=4); GPU work not started**
+**Current milestone: M0 — BLOCKED at D-019 calibration (B-003: K=8, n_p=1 cell misses the 0.06 bound); GPU work not started**
 
 ## Blocked
 
-- **B-002 (2026-11-19T05:55Z, OPEN) — the D-016 test as specified fails the Part 1 null calibration at K=4.**
+- **B-003 (2026-11-19T06:18Z, OPEN) — the D-019 test (df = K−1) misses the K >= 8 tier at n_p = 1.**
+  Stop condition from the B-002 decision: "If any K >= 8 cell misses the 0.06 bound, STOP and report the table.
+  Do not weaken the test. Next step in that case would be the parametric bootstrap."
+  - *Symptom.* `test_primary_test_null_calibration` (slow, hard, two tiers) fails one cell:
+    (sigma_sub 0.06, sigma_seed 0.03, K 8, n_p 1, n_c 3): FWER 0.0699, MC SE 0.0006, upper 95% 0.0711 > 0.06.
+    Tier 1 (FWER <= 0.07 everywhere) passes; every other K >= 8 cell has upper 95% <= 0.049. Table below.
+  - *Cause.* With n_p = 1 the placebo has no within-subset replicates. SE^2 = MSB(1 + 1/K) + s_seed^2(1/n_c − 1/n_p),
+    so the s_seed^2 term enters with weight −2/3 (−1/6 at n_p = 2). The negative weight makes the SE estimate
+    noisier than a chi-square with K−1 df: the Satterthwaite-equivalent df is ~4.1, not the assumed 7.
+  - *Outside-grid probe (200k grids, sigma_seed 0.03).* n_p = 1: K=8 0.070/0.069/0.061 and K=12
+    0.080/0.069/0.060 at sigma_sub 0.06/0.08/0.10, so raising K does not fix it. n_p = 2: K=8 0.048/0.047/0.045 and
+    K=12 0.052/0.049/0.046, max upper 95% 0.053.
+  - *Options (protocol decision, not made here).* (1) Parametric bootstrap reference distribution (the
+    fallback D-019 names). (2) Require n_p >= 2 for result runs: passes every simulated cell; it costs K extra
+    runs per budget vs n_p = 1. (3) df = min(K−1, Satterthwaite). Not simulated.
+  - *Done regardless of the choice.* D-019 recorded; df = K−1 in the test and in power/MDE; result mode refuses
+    K < 8 (`check_result_subsets`, tests `test_result_mode_refuses_k_below_8`, `test_check_result_subsets_unit`).
+  - *Not done (waits on this decision).* Step 4 (report switch + K=8 fake e2e), Parts 2-4 (hokkaido, GPU).
+    `robocurate report` still uses Welch as primary.
+  - Reproduce: `python scripts/d016_null_grid.py` (~12 s) or `pytest -q -s -m slow -k null_calibration`.
+
+| sigma_sub | sigma_seed | K, n_p, n_c | grids | FWER | MC SE | upper 95% | bound | power 15pp (MC) | power 15pp (analytic) |
+|---|---|---|---|---|---|---|---|---|---|
+| 0.00 | 0.03 | 4, 2, 3 | 40000 | 0.0000 | 0.0000 | 0.0001 | FWER <= 0.07 ok | 0.060 | 0.343 |
+| 0.00 | 0.03 | 8, 2, 3 | 200000 | 0.0024 | 0.0001 | 0.0026 | upper95 <= 0.06 ok | 0.767 | 0.860 |
+| 0.00 | 0.03 | 8, 1, 3 | 200000 | 0.0027 | 0.0001 | 0.0029 | upper95 <= 0.06 ok | 0.591 | 0.797 |
+| 0.00 | 0.06 | 4, 2, 3 | 40000 | 0.0000 | 0.0000 | 0.0000 | FWER <= 0.07 ok | 0.004 | 0.147 |
+| 0.00 | 0.06 | 8, 2, 3 | 200000 | 0.0023 | 0.0001 | 0.0025 | upper95 <= 0.06 ok | 0.269 | 0.451 |
+| 0.00 | 0.06 | 8, 1, 3 | 200000 | 0.0026 | 0.0001 | 0.0028 | upper95 <= 0.06 ok | 0.183 | 0.383 |
+| 0.02 | 0.03 | 4, 2, 3 | 40000 | 0.0000 | 0.0000 | 0.0000 | FWER <= 0.07 ok | 0.060 | 0.226 |
+| 0.02 | 0.03 | 8, 2, 3 | 200000 | 0.0100 | 0.0002 | 0.0104 | upper95 <= 0.06 ok | 0.610 | 0.654 |
+| 0.02 | 0.03 | 8, 1, 3 | 200000 | 0.0105 | 0.0002 | 0.0109 | upper95 <= 0.06 ok | 0.492 | 0.601 |
+| 0.02 | 0.06 | 4, 2, 3 | 40000 | 0.0000 | 0.0000 | 0.0000 | FWER <= 0.07 ok | 0.005 | 0.118 |
+| 0.02 | 0.06 | 8, 2, 3 | 200000 | 0.0052 | 0.0002 | 0.0055 | upper95 <= 0.06 ok | 0.240 | 0.356 |
+| 0.02 | 0.06 | 8, 1, 3 | 200000 | 0.0054 | 0.0002 | 0.0058 | upper95 <= 0.06 ok | 0.174 | 0.308 |
+| 0.04 | 0.03 | 4, 2, 3 | 40000 | 0.0014 | 0.0002 | 0.0018 | FWER <= 0.07 ok | 0.053 | 0.107 |
+| 0.04 | 0.03 | 8, 2, 3 | 200000 | 0.0362 | 0.0004 | 0.0370 | upper95 <= 0.06 ok | 0.324 | 0.311 |
+| 0.04 | 0.03 | 8, 1, 3 | 200000 | 0.0433 | 0.0005 | 0.0442 | upper95 <= 0.06 ok | 0.312 | 0.293 |
+| 0.04 | 0.06 | 4, 2, 3 | 40000 | 0.0002 | 0.0001 | 0.0003 | FWER <= 0.07 ok | 0.008 | 0.074 |
+| 0.04 | 0.06 | 8, 2, 3 | 200000 | 0.0174 | 0.0003 | 0.0179 | upper95 <= 0.06 ok | 0.182 | 0.205 |
+| 0.04 | 0.06 | 8, 1, 3 | 200000 | 0.0178 | 0.0003 | 0.0184 | upper95 <= 0.06 ok | 0.159 | 0.186 |
+| 0.06 | 0.03 | 4, 2, 3 | 40000 | 0.0083 | 0.0005 | 0.0092 | FWER <= 0.07 ok | 0.038 | 0.057 |
+| 0.06 | 0.03 | 8, 2, 3 | 200000 | 0.0478 | 0.0005 | 0.0487 | upper95 <= 0.06 ok | 0.157 | 0.146 |
+| 0.06 | 0.03 | 8, 1, 3 | 200000 | 0.0699 | 0.0006 | 0.0711 | upper95 <= 0.06 **FAIL** | 0.179 | 0.141 |
+| 0.06 | 0.06 | 4, 2, 3 | 40000 | 0.0010 | 0.0002 | 0.0013 | FWER <= 0.07 ok | 0.012 | 0.047 |
+| 0.06 | 0.06 | 8, 2, 3 | 200000 | 0.0365 | 0.0004 | 0.0373 | upper95 <= 0.06 ok | 0.122 | 0.114 |
+| 0.06 | 0.06 | 8, 1, 3 | 200000 | 0.0428 | 0.0005 | 0.0437 | upper95 <= 0.06 ok | 0.126 | 0.107 |
+
+- **B-002 (RESOLVED by D-019; 2026-11-19T05:55Z, OPEN) — the D-016 test as specified fails the Part 1 null calibration at K=4.**
   Branch `m0-calibration`. Stop condition hit ("Any Part 1 FPR cell exceeds 0.07 (do not weaken the test)").
   Parts 2-4 (hokkaido, GPU) were NOT started; GPU-hours used: 0.
   - *Symptom.* Holm family-wise FPR (7 null cleaners, 200 rollouts, base 0.5, 40 000 grids/cell, MC SE in
@@ -89,8 +137,10 @@
 | UTC | Step | Commit | Outcome | GPU-h |
 |---|---|---|---|---|
 | 2026-11-19T05:55Z | Part 0: D-016/017/018, protocol `calibration_seed_start: 300000`, CLAUDE.md rule 10 | `63a9a5a` | committed | 0 |
-| 2026-11-19T05:55Z | Part 1: D-016 variance components, Satterthwaite test, Design/power/MDE, grid script | (this commit) | **blocked, B-002** | 0 |
+| 2026-11-19T05:55Z | Part 1: D-016 variance components, Satterthwaite test, Design/power/MDE, grid script | `ba55b62` | blocked, B-002 | 0 |
+| 2026-11-19T06:18Z | D-019: df = K−1, result-mode K >= 8 guard, hard two-tier calibration test, `report/simulate.py` | (this commit) | **blocked, B-003** | 0 |
 
+D-019 step: default 145 passed; integration 3 passed; slow 7 passed + 1 FAILED (`test_primary_test_null_calibration`, B-003, intended); ruff clean.
 Part 1 commands: `pytest -q -m "not gpu and not slow"` 143 passed; `-m slow` 8 passed; `-m integration` 3 passed;
 `ruff check .` clean; `python scripts/d016_null_grid.py --n 40000`. `robocurate report` still uses Welch
 (unchanged) until B-002 is resolved. `SEED_FLOOR` / `test: welch_holm` in the protocol are unchanged for the same reason.

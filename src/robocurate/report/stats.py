@@ -1,4 +1,4 @@
-"""Statistics for RoboCurate-Bench (D-002; D-016 test implemented, not yet primary: PROGRESS.md B-002).
+"""Statistics for RoboCurate-Bench (D-002 as amended by D-016 and D-019).
 
 Unit of analysis = training run. Each run contributes ONE number: its success rate over the eval
 rollouts of its final checkpoint. Rollouts are never pooled across runs as independent samples.
@@ -10,7 +10,8 @@ subset-to-subset variance. Statistic t = (mean_c - mean_p) / SE with
 
 mean_p = mean of the K random-subset means. s_sub^2 comes from a one-way random-effects ANOVA on the
 placebo runs (truncated at 0); s_seed^2 is the within-condition variance pooled over the replicates of
-ALL conditions (each cleaner, oracle, full, each random subset). Satterthwaite df; Holm across cleaners.
+ALL conditions (each cleaner, oracle, full, each random subset). df = K - 1 always (D-019: the between-subset
+term dominates the SE and is estimated from K subset means); Holm across cleaners.
 Unbalanced placebo designs use the general forms (n0 for the ANOVA, sum 1/n_i / K^2 for the mean).
 
 Secondary diagnostics (labeled as such in reports): Welch t-test of a cleaner's runs vs all placebo runs
@@ -336,13 +337,6 @@ class SubsetTestResult:
     p: float
 
 
-def _satterthwaite(terms: Sequence[tuple[float, float]]) -> float:
-    """terms: (coefficient * mean square, df). df = (sum)^2 / sum(term^2 / df)."""
-    tot = sum(t for t, _ in terms)
-    den = sum(t * t / d for t, d in terms if d > 0)
-    return float(tot * tot / den) if den > 0 else float("inf")
-
-
 def subset_test(
     cleaner_runs: Sequence[float],
     vc: VarianceComponents,
@@ -362,13 +356,8 @@ def subset_test(
     a = (1.0 if own_subset_var else 0.0) + 1.0 / vc.K  # coefficient of s_sub^2
     h = 1.0 / n_c + vc.inv_n_sum / vc.K**2  # coefficient of s_seed^2
     diff = float(c.mean() - placebo_mean)
-    if vc.truncated:
-        se2 = vc.s_seed2 * h
-        df = float(vc.df_w)
-    else:  # SE^2 = (a/n0) MSB + (h - a/n0) MSW, Satterthwaite over both mean squares
-        tb, tw = a / vc.n0 * vc.msb, (h - a / vc.n0) * vc.s_seed2
-        se2 = tb + tw
-        df = _satterthwaite([(tb, vc.df_b), (tw, vc.df_w)])
+    se2 = vc.s_sub2 * a + vc.s_seed2 * h
+    df = float(vc.df_b)  # D-019: always K - 1
     if se2 <= 0:
         p = 1.0 if diff == 0 else 0.0
         t = 0.0 if diff == 0 else math.copysign(math.inf, diff)
@@ -403,22 +392,16 @@ def subset_test_arrays(cleaners: np.ndarray, placebo: np.ndarray, extra: np.ndar
     if df_w < 1:
         raise ValueError("D-016 test needs >= 1 within-condition replicate")
     s_seed2 = ss / df_w
-    raw = (msb - s_seed2) / n_p
-    trunc = raw <= 0
-    a = 1.0 + 1.0 / K
-    h = 1.0 / n_c + 1.0 / (K * n_p)
-    tb = a / n_p * msb
-    tw = (h - a / n_p) * s_seed2
-    se2 = np.where(trunc, s_seed2 * h, tb + tw)
+    s_sub2 = np.maximum((msb - s_seed2) / n_p, 0.0)
+    se2 = s_sub2 * (1.0 + 1.0 / K) + s_seed2 * (1.0 / n_c + 1.0 / (K * n_p))
+    df = np.full(se2.shape, float(K - 1))  # D-019
     with np.errstate(divide="ignore", invalid="ignore"):
-        den = np.where(trunc, 0.0, tb**2 / (K - 1)) + np.where(trunc, (s_seed2 * h) ** 2, tw**2) / df_w
-        df = np.where(trunc, float(df_w), se2**2 / den)
         diff = cleaners.mean(-1) - pm[..., None]
         t = diff / np.sqrt(se2)[..., None]
-        p = 2.0 * sps.t.sf(np.abs(t), df[..., None])
+        p = 2.0 * sps.t.sf(np.abs(t), K - 1)
     deg = (se2 <= 0)[..., None]
     p = np.where(deg, np.where(diff == 0, 1.0, 0.0), p)
-    return diff, t, np.broadcast_to(df[..., None], diff.shape), p, np.maximum(raw, 0.0), s_seed2
+    return diff, t, np.broadcast_to(df[..., None], diff.shape), p, s_sub2, s_seed2
 
 
 @dataclass(frozen=True)
@@ -446,21 +429,16 @@ class Design:
 
 
 def design_se(sigma_sub: float, sigma_seed: float, d: Design) -> tuple[float, float]:
-    """True SE of (mean_c - mean_p) under the design, and the Satterthwaite df at the expected mean squares."""
+    """True SE of (mean_c - mean_p) under the design, and the test's df = R(K - 1) (D-019)."""
     a = 1.0 + 1.0 / d.K
     h = 1.0 / d.n_c + 1.0 / (d.K * d.n_p)
     se2 = (sigma_sub**2 * a + sigma_seed**2 * h) / d.R
-    msb = sigma_seed**2 + d.n_p * sigma_sub**2
-    tb = a / d.n_p * msb / d.R
-    tw = (h - a / d.n_p) * sigma_seed**2 / d.R
-    # expected s_sub^2 = 0 -> SE uses s_seed only
-    df = float(d.df_w) if sigma_sub == 0 else _satterthwaite([(tb, d.df_b), (tw, d.df_w)])
-    return math.sqrt(se2), df
+    return math.sqrt(se2), float(d.df_b)
 
 
 def subset_power(effect: float, sigma_sub: float, sigma_seed: float, d: Design, alpha: float = 0.05,
                  n_comparisons: int | None = None) -> float:
-    """Approximate power of the D-016 test (noncentral t at the Satterthwaite df; Bonferroni alpha/m =
+    """Approximate power of the D-016/D-019 test (noncentral t at df = R(K-1); Bonferroni alpha/m =
     Holm's strictest step, conservative). sigma_seed includes eval binomial noise (use run_level_sigma)."""
     m = d.n_cleaners if n_comparisons is None else n_comparisons
     se, df = design_se(sigma_sub, sigma_seed, d)

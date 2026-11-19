@@ -21,6 +21,7 @@ import yaml
 
 SEED_FLOOR = 6  # D-015 (Welch + Holm needs >= 6 runs per condition to hold the null FWER)
 
+RESULT_MIN_SUBSETS = 8  # D-019: result-mode runs need K >= 8 random subsets per budget
 CALIBRATION_SEED_SPAN = 100_000  # calibration_seed_start .. +SPAN is reserved for calibration evals (D-017)
 
 Mode = Literal["result", "calibration", "fake", "plan"]
@@ -309,6 +310,14 @@ class GridConfig(_Guarded):
         if "cleaner" in kinds and not ("random" in kinds and "full" in kinds):
             raise ConfigError("cleaners must be compared to random subsets AND full data (rule 1)")
         return out
+
+
+def check_result_subsets(grid: GridConfig) -> None:
+    """D-019: result-mode grids need K >= RESULT_MIN_SUBSETS random subsets per budget (calibration may use fewer)."""
+    ks = [c.n_subsets for c in grid.condition_specs() if c.kind == "random"]
+    if not ks or min(ks) < RESULT_MIN_SUBSETS:
+        raise ConfigError(f"result mode refused: grid has K = {ks or 0} random subsets per budget; "
+                          f"D-019 requires K >= {RESULT_MIN_SUBSETS}")
 
 
 def load_grid(path: str | Path, mode: Mode = "plan") -> GridConfig:

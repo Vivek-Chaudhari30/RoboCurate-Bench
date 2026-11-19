@@ -36,6 +36,9 @@ def cmd_plan(args) -> int:
 
 
 def _result_mode_guard(plan) -> None:
+    from robocurate.config import check_result_subsets
+
+    check_result_subsets(plan.grid)  # D-019: K >= 8
     if not _repo_path(FROZEN_MARKER).exists():
         raise ConfigError(f"result mode refused: {FROZEN_MARKER} does not exist (eval code not frozen)")
     missing = tbd_fields(plan.protocol) + [f"task.{f}" for f in tbd_fields(plan.task)]
