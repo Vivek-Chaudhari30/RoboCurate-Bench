@@ -1,0 +1,56 @@
+"""Cleaner registry: built-ins plus third-party plugins from the entry-point group "robocurate.cleaners".
+
+A plugin package declares, in its own pyproject.toml:
+
+    [project.entry-points."robocurate.cleaners"]
+    my_cleaner = "my_pkg.module:MyCleaner"
+
+The entry point may name a Cleaner subclass or a zero-argument factory returning a Cleaner instance.
+The oracle (D-012) is deliberately NOT registered here; it lives in robocurate.runs.oracle.
+"""
+
+from __future__ import annotations
+
+from importlib import metadata
+
+from robocurate.cleaners.base import Cleaner
+from robocurate.cleaners.builtin import LengthHeuristic, RandomSubset
+
+ENTRY_POINT_GROUP = "robocurate.cleaners"
+BUILTINS: dict[str, type[Cleaner]] = {c.name: c for c in (RandomSubset, LengthHeuristic)}
+
+
+class RegistryError(LookupError):
+    pass
+
+
+def instantiate(obj) -> Cleaner:
+    inst = obj() if callable(obj) else obj
+    if not isinstance(inst, Cleaner):
+        raise RegistryError(f"{obj!r} did not produce a Cleaner")
+    if not inst.name or not inst.version:
+        raise RegistryError(f"{type(inst).__name__} must set non-empty name and version")
+    return inst
+
+
+def plugin_entry_points() -> dict[str, metadata.EntryPoint]:
+    return {ep.name: ep for ep in metadata.entry_points(group=ENTRY_POINT_GROUP)}
+
+
+def available() -> list[str]:
+    return sorted(set(BUILTINS) | set(plugin_entry_points()))
+
+
+def get(name: str, version: str | None = None) -> Cleaner:
+    if name in BUILTINS:
+        inst = instantiate(BUILTINS[name])
+    else:
+        eps = plugin_entry_points()
+        if name not in eps:
+            raise RegistryError(f"unknown cleaner {name!r}; available: {available()}")
+        inst = instantiate(eps[name].load())
+        if inst.name != name:
+            raise RegistryError(f"entry point {name!r} produced cleaner named {inst.name!r}")
+    if version is not None and str(inst.version) != str(version):
+        raise RegistryError(f"cleaner {name!r} is version {inst.version!r}, grid asks for {version!r}")
+    return inst
