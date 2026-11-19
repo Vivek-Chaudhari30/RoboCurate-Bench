@@ -649,6 +649,29 @@ Task B grid (slow, 4 min: 57 runs). Result: 6 passed + 1 skipped (rcb); env test
   needs strong noise. Failed grasp: right gripper (dim 13) forced to 1.0 (open, its max) from frame 135 (where the
   scripted right gripper starts closing in all 50 episodes; it crosses 0.5 at frame 152) to the end.
 
+- **validate-defects on the CPU-buildable part** (`scripts/diagnostics/task_a_v1_validate.py`; offline HF cache,
+  actions/state/timestamps only). The video build of the 90 episodes is blocked tonight: huggingface.co presents a
+  self-signed certificate chain from this network (TLS not bypassed), and the scripted source is cached as parquet
+  only. So the recipe plan and its post-hoc pauses were applied to the cached parquet episodes, exactly as
+  `build_mixture` applies them (`inject_pause` on frames, timestamps regenerated at 50 fps).
+
+  | | n | any pause | interior pause | interior pause s p50 | jitter > 0.10 | HF share p50 | exact dups | near-dup pairs |
+  |---|---|---|---|---|---|---|---|---|
+  | task_a_v1 CPU part (40 scripted + 50 human; 45 paused) | 90 | 0.50 | 0.50 | 0.94 | 0.00 | 8.9e-4 | 0 | 2 |
+  | aloha scripted (source) | 50 | 0.00 | 0.00 | - | 0.00 | 1.1e-3 | 0 | 13 |
+  | aloha human (source) | 50 | 0.00 | 0.00 | - | 0.00 | 4.7e-4 | 0 | 0 |
+  | community (5 SO-100/101 sets) | 331 | 0.85-1.00 | median 0.50 (0.06-0.90) | medians 0.62-1.20 | 0 in 4 sets, 0.15 in 1 | 9e-6 to 8e-4 | 0 | 0 |
+
+  How it compares:
+  - **Matches:** the interior pause rate and pause length are at the community medians; there are no exact
+    duplicates; the sources have no natural pauses, so injected pauses do not double-count.
+  - **Differs:**
+    - No boundary idle. Community data idles at episode start/end in 85-100% of episodes; we do not inject
+      this (D-011 lists interior pauses only).
+    - The scripted source has 13 near-duplicate pairs by construction; 2 survive in the mixture's 40 scripted
+      episodes, while the community has 0.
+    - Jitter comes only from the deferred replay-mode episodes.
+
 ## CUPID diffusion toybed (overnight 2, item 3, D-029) — FAIL: stays disabled
 
 Timebox 4 h; used ~1 h. CPU only. Nothing about the entrant was tuned; the toybed was fixed before the first CUPID run.
