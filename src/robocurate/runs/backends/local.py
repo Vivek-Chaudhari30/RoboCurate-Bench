@@ -8,7 +8,7 @@ Per run:
      full -> all; random -> RandomSubset with rng seeded by protocol.random_subset_seeds[subset_index];
      cleaner -> the selection cached by `robocurate prepare` (D-022; the cleaner is never called inside a run,
      so every train seed uses the SAME subset); weighting / weight_placebo -> all episodes, trained with
-     LeRobot's RA-BC sample weighting on the prepared (or permuted, D-020) progress parquet;
+     LeRobot's RA-BC sample weighting on the prepared progress parquet (weight_placebo: refused, B-005);
      oracle -> runs.oracle (labels).
   2. Materialize the subset with subset-only stats (data/subset.py, D-013).
   3. lerobot-train (train/lerobot_train.py), peak GPU memory polled via nvidia-smi.
@@ -124,12 +124,16 @@ class LocalBackend:
                            self.replicate)
 
     def progress_parquet(self, spec: RunSpec) -> Path | None:
-        """RA-BC progress parquet for weighting-track runs (permuted for the D-020 placebo)."""
+        """RA-BC progress parquet for the weighting entrant. The D-025 placebo is a set of per-frame WEIGHT curves;
+        lerobot-train 0.6.1 accepts weights only through RA-BC progress (utils/sample_weighting.py:125-132, no hook
+        for precomputed weights), so placebo runs are refused until a weight path is decided (PROGRESS.md B-005)."""
         c = spec.condition
         if c.kind == "weighting":
             return Path(self.record(spec)["progress_parquet"])
         if c.kind == "weight_placebo":
-            return Path(self.record(spec)["placebo_parquets"][str(spec.subset_index)])
+            raise LocalBackendRefused(
+                "weight_placebo (D-025) needs precomputed per-frame weights in lerobot-train; LeRobot 0.6.1 only "
+                "takes RA-BC progress (utils/sample_weighting.py:125-132). Decision needed: see PROGRESS.md B-005")
         return None
 
     def _run(self, cmd: list[str], log: Path) -> float | None:

@@ -3,10 +3,11 @@
 
 Runs never call a cleaner; they only read this cache (`load_record`).
 
-Cache layout: <cache>/<task>/<name>-v<version>/budget<b>-rep<r>.json (+ progress.parquet, perm<i>.parquet for
-the weighting track). The record's `key` is sha256 over the inputs: dataset fingerprint (label-free view), budget,
-replicate, cleaner name/version, protocol tie_break_salt, max_curation_rollouts, selection seed, reference-policy
-tree hash and progress-model revision. A record whose inputs no longer match is stale and is recomputed.
+Cache layout: <cache>/<task>/<name>-v<version>/budget<b>-rep<r>.json (+ progress.parquet, weights.parquet and
+perm<i>_weights.parquet for the weighting track, D-025). The record's `key` is sha256 over the inputs: dataset
+fingerprint (label-free view), budget, replicate, cleaner name/version, protocol tie_break_salt,
+max_curation_rollouts, selection seed, reference-policy tree hash, progress-model revision and (weighting) the
+RA-BC chunk size. A record whose inputs no longer match is stale and is recomputed.
 """
 
 from __future__ import annotations
@@ -28,7 +29,12 @@ from robocurate.cleaners.base import Cleaner, WeightingCleaner, budget_count, va
 from robocurate.curation.context import CurationContext, ReferencePolicy
 from robocurate.curation.progress import CachedProgress, MockProgressModel
 from robocurate.curation.rollouts import RolloutResult, RolloutService
-from robocurate.curation.weights import permute_progress, write_progress_parquet
+from robocurate.curation.weights import (
+    permute_weight_curves,
+    rabc_frame_weights,
+    write_progress_parquet,
+    write_weights_parquet,
+)
 from robocurate.data.episodes import DatasetView, synthetic_view
 
 SCHEMA = 1
@@ -130,7 +136,8 @@ def fake_context_factory(protocol: Any, view: DatasetView, cache_dir: Path) -> C
     return make
 
 
-def _inputs(cell: Cell, cleaner: Cleaner, view: DatasetView, protocol: Any, ctx: CurationContext) -> dict[str, Any]:
+def _inputs(cell: Cell, cleaner: Cleaner, view: DatasetView, protocol: Any, ctx: CurationContext,
+            rabc_chunk_size: int | None = None) -> dict[str, Any]:
     return {
         "schema": SCHEMA, "task": cell.task, "kind": cell.kind, "budget": cell.budget, "replicate": cell.replicate,
         "cleaner": cleaner.name, "version": cleaner.version, "view_fingerprint": view.fingerprint(),
@@ -141,11 +148,16 @@ def _inputs(cell: Cell, cleaner: Cleaner, view: DatasetView, protocol: Any, ctx:
         "progress_model": getattr(ctx.progress_model, "revision", None),
         "weight_permutation_seeds": list(protocol.weight_permutation_seeds or [])[: cell.n_permutations]
         if cell.kind == "weighting" else None,
+        "rabc_chunk_size": rabc_chunk_size if cell.kind == "weighting" else None,
+        "weighting_placebo": "D-025" if cell.kind == "weighting" else None,
     }
 
 
 def prepare_cell(cell: Cell, cleaner: Cleaner, view: DatasetView, protocol: Any, ctx: CurationContext,
-                 cache_dir: str | Path, backend: str) -> dict[str, Any]:
+                 cache_dir: str | Path, backend: str, rabc_chunk_size: int | None = None) -> dict[str, Any]:
+    """rabc_chunk_size: the trained policy's chunk_size (RA-BC delta horizon); required for weighting cells."""
+    if cell.kind == "weighting" and not rabc_chunk_size:
+        raise PrepareError("weighting cells need rabc_chunk_size (the policy's chunk_size) for the D-025 placebo")
     problems = validate_resources(cleaner, protocol.max_curation_rollouts)
     if problems:
         raise PrepareError(f"{cleaner.name}: invalid resource declaration: {problems}")
@@ -156,7 +168,7 @@ def prepare_cell(cell: Cell, cleaner: Cleaner, view: DatasetView, protocol: Any,
         raise PrepareError(f"{cleaner.name} requires a GPU; CUDA_VISIBLE_DEVICES is empty (GPU use not authorized)")
     cache_dir = Path(cache_dir)
     out = cache_dir / cell.relpath()
-    inputs = _inputs(cell, cleaner, view, protocol, ctx)
+    inputs = _inputs(cell, cleaner, view, protocol, ctx, rabc_chunk_size)
     key = _key(inputs)
     if out.exists():
         rec = json.loads(out.read_text())
@@ -189,10 +201,14 @@ def prepare_cell(cell: Cell, cleaner: Cleaner, view: DatasetView, protocol: Any,
             d = out.parent / out.stem
             meta = {"cleaner": f"{cleaner.name}@{cleaner.version}", "key": key}
             rec["progress_parquet"] = str(write_progress_parquet(prog, d / "progress.parquet", meta))
-            rec["placebo_parquets"] = {
-                str(i): str(write_progress_parquet(permute_progress(prog, s), d / f"perm{i}.parquet",
-                                                   {**meta, "permutation_seed": s}))
+            # D-025 placebo: permute the entrant's RA-BC frame-weight curves across episodes, resample, rescale
+            w = rabc_frame_weights(prog, chunk_size=int(rabc_chunk_size))
+            rec["entrant_weights_parquet"] = str(write_weights_parquet(w, d / "weights.parquet", meta))
+            rec["placebo_weight_parquets"] = {
+                str(i): str(write_weights_parquet(permute_weight_curves(w, s), d / f"perm{i}_weights.parquet",
+                                                  {**meta, "permutation_seed": s, "placebo": "D-025"}))
                 for i, s in enumerate(inputs["weight_permutation_seeds"])}
+            rec["mean_frame_weight"] = float(np.concatenate(list(w.values())).mean())
             rec["progress_summary"] = {"mean_final": float(np.mean([p[-1] for p in prog.values()])),
                                        "n_frames": int(sum(lens.values()))}
     finally:
@@ -223,10 +239,15 @@ def prepare_cell(cell: Cell, cleaner: Cleaner, view: DatasetView, protocol: Any,
 
 def prepare_plan(plan: Any, view: DatasetView, cache_dir: str | Path, backend: str,
                  context_factory: Callable[[Cleaner], CurationContext], replicate: int = 0) -> list[dict[str, Any]]:
+    from robocurate.curation.weights import policy_chunk_size
+
     out = []
-    for cell in cells_for_plan(plan, replicate):
+    cells = cells_for_plan(plan, replicate)
+    chunk = policy_chunk_size(plan.task.policy_type) if any(c.kind == "weighting" for c in cells) else None
+    for cell in cells:
         cleaner = registry.get(cell.name, cell.version)
-        out.append(prepare_cell(cell, cleaner, view, plan.protocol, context_factory(cleaner), cache_dir, backend))
+        out.append(prepare_cell(cell, cleaner, view, plan.protocol, context_factory(cleaner), cache_dir, backend,
+                                rabc_chunk_size=chunk))
     return out
 
 

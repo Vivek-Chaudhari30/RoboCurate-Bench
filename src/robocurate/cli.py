@@ -76,7 +76,7 @@ def cmd_prepare(args) -> int:
     for r in recs:
         c = r["cleaner"]
         what = (f"{len(r['selected_episodes'])} episodes" if "selected_episodes" in r
-                else f"progress + {len(r['placebo_parquets'])} permutation parquets")
+                else f"progress + weights + {len(r['placebo_weight_parquets'])} D-025 placebo weight parquets")
         print(f"{c['name']} v{c['version']} [{c['track']}] budget {r['inputs']['budget']}: {what}; "
               f"{'cached' if r['_cached'] else 'computed'} in {r['wall_clock_s']:.2f}s, GPU-h {r['gpu_h']:.3f}, "
               f"rollouts {r['rollouts_used']}, key {r['key'][:12]}")
