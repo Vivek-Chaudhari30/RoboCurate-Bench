@@ -36,6 +36,7 @@ Start 2026-11-19T16:32Z (`caffeinate -dims -t 43200`). Env: rcb (py3.12, lerobot
 |---|---|---|---|---|
 | 2026-11-19T16:34Z | 1 decisions | D-027..D-032 appended verbatim to DECISIONS.md; protocol.yaml random_subset_seeds 2000–2011, weight_permutation_seeds 3000–3011 (approved); test:d026_balanced and floor-3 comments kept; two tests updated for the new lists | default 227 passed + 1 xfailed; ruff clean | done |
 | 2026-11-19T16:37Z | 2 D-028 | weights.py: permute_progress_curves replaces permute_weight_curves/write_weights_parquet (no rescale); prepare writes perm{i}_progress.parquet (RA-BC schema, rabc.py:101-126) and records placebo_progress_parquets, weighting_placebo D-028; local backend placebo refusal removed (permutation subset_index -> its parquet); CLI print updated. Tests: shapes, identity exact, seeded, resample/no-rescale, golden rabc vs placebo cmd differ only in progress path, LeRobot make_sample_weighter/RABCWeights (utils/sample_weighting.py:103-185, rabc.py:175-233) accept placebo files with finite weights. B-005 and B-006 closed. | default 227 passed + 1 xfailed; test_curation 23 passed; ruff clean | done |
+| 2026-11-19T16:51Z | 3 CUPID diffusion | tests/toybed/diffusion.py (DDPM toy policy, LeRobot Diffusion defaults); cupid.py native diffusion path (official square output, 64 timesteps, d 4000, lambda 0, net/sum_of_sum; agiachris/cupid@2941eba); rollouts reset chunked policies; tests (autograd parity, AUROC helper, premise, strict-xfail sanity); README limitation per D-029 | new tests 3 passed + 1 xfailed (slow incl.); ruff clean | FAIL: AUROC 0.52 < 0.8 (3 seeds 0.51-0.52); premise holds (0.07 vs 1.00); CUPID stays disabled everywhere; damping diagnostics recorded |
 <!-- ng-log -->
 
 ## Previous status (B-003/M0-launch task, STOPPED at Step 1, B-004; superseded by D-026)
@@ -368,9 +369,46 @@ d = 4000, lambda = 0, m = 100).
 - *Next step if wanted.* (b): a toy diffusion policy (DDPM loss, the reference "square" output, Q = 1) on the
   toybed, then require the sanity pass there.
 
+## CUPID diffusion toybed (overnight 2, item 3, D-029) — FAIL: stays disabled
+
+Timebox 4 h; used ~1 h. CPU only. Nothing about the entrant was tuned; the toybed was fixed before the first CUPID run.
+
+- *Official code read (raw GitHub, read-only).* agiachris/cupid@2941eba9: `modelout_functions.py:79-82` (fresh
+  noise, scheduler add_noise), `:116-119` ("square" = mean(pred^2) of the denoiser output), `:128-136` (Q = 1);
+  `gradient_computers.py:110-128` (per-sample grads averaged over num_timesteps); `train_trak_diffusion.py:175-182,
+  214-221` (timesteps ~ randint(num_train_timesteps), same output for train samples and rollout targets);
+  `scripts/train/train_trak.sh:309,311,315-316` (proj_dim 4000, lambda_reg 0.0, loss_fn "square", num_timesteps 64);
+  `error_util.py:17-19, 299-330` (sum_of_sum, "net" = successes minus failures). TRAK submodule
+  agiachris/trak@ff2fdc84 `trak/score_computers.py:157-166`: `inv(X^T X + lambda I)` in float32, rescaled by its mean
+  absolute value.
+- *Toybed* (`tests/toybed/diffusion.py`): same 2D reach env; `make_dataset(n_clean=240, n_wrong=60, n_pause=0,
+  n_jitter=0, seed=0)` = 300 demos, 4230 frames (N > d = 4000); DDPM with LeRobot's Diffusion defaults
+  (configuration_diffusion.py:139-147: 100 train timesteps, squaredcos_cap_v2, epsilon, clip 1.0, 100 inference
+  steps); declared toy simplifications: MLP denoiser (23,312 params), 1 obs step, chunk 8 executed open-loop, no EMA.
+  Trained 4000 steps, batch 256, AdamW lr 1e-3.
+- *Premise holds.* Success over 200 toy seeds (900000+): all demos 0.075 / 0.070 / 0.075; without the wrong mode
+  1.000 / 1.000 / 1.000 (train seeds 0/1/2). Test `test_diffusion_toybed_premise` (slow).
+- *Entrant.* `cupid.py` gained the native path (used when the reference policy declares `policy_family ==
+  "diffusion"`): official "square" output, 64 timesteps, d = 4000, lambda 0, m = 100 rollouts of the diffusion
+  policy itself, net + sum_of_sum. Unit test: vmap features equal per-sample autograd
+  (`test_cupid_diffusion_square_features_match_autograd`). The rollout backend now calls `policy.reset()` per
+  episode (chunked policies).
+- *Result (pass rule AUROC >= 0.8 for wrong demos ranked most harmful).* Entrant run: **AUROC 0.52** (kept 47% of
+  wrong vs 51% of clean at a 50% budget; 8/100 rollouts succeeded; 13 s). Same config, policy seeds 0/1/2:
+  0.514 / 0.518 / 0.518. **FAIL → CUPID stays disabled for all policy families**; no per-family enablement was
+  added. `test_sanity_cupid_diffusion` is a strict xfail (slow).
+- *Diagnostics only (not adopted; the entrant keeps lambda = 0).* The Gram matrix Phi^T Phi is numerically singular
+  (min eigenvalue ~ -3e-5 vs max 7e3) although N > d. TRAK's exact float32 `inv` + mean-abs rescale: 0.482 / 0.500.
+  "ddpm" output: 0.512. d = 400: 0.586. 4x data (N = 16,939): 0.470 (but only 1/100 rollouts succeed). Damping:
+  lambda = 1: 0.578; 10: 0.714 / 0.779 / 0.724 (seeds 0/1/2); 100: 0.819; 1e6 (H ~ lambda I, plain gradient
+  similarity): 1.000. Reading: the "square" features carry the signal; the undamped inverse of a near-singular
+  Gram matrix destroys it on this toybed. A damped variant would be a deviation from the published defaults:
+  decision for Vivek (it would have to be fixed before any task result and reported as a variant, not as CUPID).
+- Scripts: scratchpad `diff_premise.py`, `diff_cupid.py`, `diff_diag.py` (not committed; numbers above).
+
 ## Blocked
 
-- **B-006 (CLOSED by D-027: /share/datasets/robocurate; 2026-11-19T15:10Z, OPEN) — no scratch path on hokkaido; Step 2 outcome (c), Step 3 skipped.**
+- **B-006 (2026-11-19T15:10Z; CLOSED by D-027: /share/datasets/robocurate) — no scratch path on hokkaido; Step 2 outcome (c), Step 3 skipped.**
   - *Evidence (read-only).* `ssh hokkaido 'ls -ld /disk /disk/u; ls /disk; ...'`: "ls: cannot access '/disk': No such
     file or directory" (twice). Mounts: `/` = local NVMe `/dev/nvme0n1p2` (1.8 T, 98% used, 52 G free);
     `/share/NFS` (baushare, 104 T, 31 T free); `/share/datasets` (baunas24, 98 T, 42 T free). `$HOME` =

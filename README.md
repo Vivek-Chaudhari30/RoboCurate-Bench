@@ -61,7 +61,7 @@ Entrants:
 | `rabc` | weighting | wrapped (LeRobot RA-BC) |
 | `demo_score` | selection | reimplementation |
 | `deminf` | selection | reimplementation |
-| `cupid` | selection | reimplementation — **disabled (failed toybed sanity)**; refused in grids, excluded from the leaderboard |
+| `cupid` | selection | reimplementation — **disabled (failed toybed sanity on ACT-style and diffusion toybeds, D-029)**; refused in grids, excluded from the leaderboard |
 | `rcb_score` | selection | ours, v1 frozen |
 
 Baselines are random subsets, full data and the oracle.
@@ -91,16 +91,22 @@ To submit your own cleaner, see [docs/submit.md](docs/submit.md).
 - **Single-mixture subset-variance floor.** A cleaner applied to one mixture yields one subset. More seeds cannot
   remove that variance; only more random subsets (K) and mixture replicates (R) shrink it. The MDE at the launch
   design may be large (Part 1 simulations: ≤ 0.32 power for a 15 pp effect once the subset SD reaches 0.04).
-- **Null calibration is open for one design.** The primary test misses its K ≥ 8 calibration target at one seed
-  per random subset (PROGRESS.md B-003). Designs with ≥ 2 seeds per subset pass.
+- **Balanced designs only.** The primary test (D-026) is exact only when entrant and placebo runs use the same seed
+  count n ≥ 3 and K ≥ 8 random subsets; other designs are labelled NOT RESULT-ELIGIBLE.
 - **Reward-model coverage.** Robometer-based entrants depend on one reward model and its revision. The mock used
   in tests says nothing about it.
 - **Checker coverage.**
-  - Wrapped checkers have not yet been executed in the benchmark environment.
+  - Wrapped checkers pass conformance and the toybed check on CPU; they have not run on a benchmark mixture yet.
   - trajlens and retake are not adapted (dependency conflicts / external API use).
   - lerobot-doctor reports at most 20 flagged episodes.
-- **Reimplementations.** CUPID, DemInf and Demo-SCORE are reimplementations with declared adaptations. CUPID does
-  not pass its toy sanity check with published defaults; it is disabled (see PROGRESS.md, CUPID sanity investigation).
+- **Reimplementations.** CUPID, DemInf and Demo-SCORE are reimplementations with declared adaptations.
+- **Influence-based curation with unimodal policies (D-029).** With an ACT-style unimodal (MSE) policy, first-order
+  influence did not separate planted wrong-direction demos from clean ones on our toybed (AUROC ≈ 0.5, even with an
+  exact Hessian and 4,000 rollouts), although those demos halve closed-loop success. This is a limitation of the
+  method family on unimodal policies, not a verdict on CUPID. CUPID was also tested in its native setting, a toy
+  diffusion policy with the official "square" output, 64 timesteps, d = 4000 and lambda = 0: AUROC 0.51–0.52 over
+  3 seeds, below the 0.8 pass bar, with a near-singular TRAK Gram matrix. It therefore stays disabled on every task
+  (PROGRESS.md, CUPID sanity investigation and CUPID diffusion toybed).
 
 ## Credits
 

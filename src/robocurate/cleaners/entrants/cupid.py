@@ -22,6 +22,21 @@ Benchmark adaptation (declared): the policy is rolled out STOCHASTICALLY as N(mu
 BC residual of the reference policy on the dataset (the homoscedastic-Gaussian MLE). A deterministic rollout
 policy makes grad l(s', mu(s')) = 0 for an MSE policy, so the influence would vanish; CUPID's diffusion policy is
 stochastic by construction. The LeRobot/ACT path needs a loss(batch) adapter for PreTrainedPolicy (not built).
+
+Diffusion path (D-029, native setting; used when the reference policy declares policy_family == "diffusion"):
+  * Model output = the official "square" function (diffusion_policy/data_attribution/modelout_functions.py:116-119
+    @2941eba): f = mean(eps_theta(noisy_chunk, t, obs)^2) over the action chunk, with fresh Gaussian noise and the
+    chunk noised by the scheduler (:79-82); Q = 1 (get_out_to_loss_grad, :128-136).
+  * Per-sample feature = gradient of f w.r.t. the denoiser weights averaged over num_timesteps = 64 timesteps drawn
+    uniformly from [0, num_train_timesteps) (train_trak.sh:316; train_trak_diffusion.py:175-182 and 214-221;
+    gradient_computers.py:110-128 `_average_vectorize`), projected to d = 4000 (train_trak.sh:309), H = Phi^T Phi
+    with lambda_reg = 0 (:311). Training samples and rollout targets use the same output function.
+  * Scores: train-target TRAK score phi_target^T H^-1 phi_train; trajectory scores aggregated with sum_of_sum and
+    the "net" demo-quality metric (error_util.py:17-19, 299-330): successes minus failures. Higher = keep.
+  * Rollouts: the diffusion policy is sampled as is (stochastic by construction); m = 100.
+  The policy object supplies `denoiser` (nn.Module(noisy, t, obs)), `alphas_cumprod`, `num_train_timesteps`,
+  `make_samples(states, actions) -> (obs, chunks)` and `reseed(seed)`. Only the toybed policy implements this; a
+  LeRobot DiffusionPolicy adapter is not built.
 """
 
 from __future__ import annotations
@@ -35,6 +50,8 @@ from robocurate.cleaners.base import ScoreCleaner
 from robocurate.data.episodes import DatasetView, EpisodeData
 
 PROJ_DIM, LAMBDA_REG, N_ROLLOUTS, CHUNK = 4000, 0.0, 100, 512
+NUM_TIMESTEPS = 64  # train_trak.sh:316
+DIFF_CHUNK = 64
 
 
 class _LossWrap(nn.Module):
@@ -73,6 +90,60 @@ def performance_influence(train_feats: torch.Tensor, target_sum: torch.Tensor, H
     return train_feats @ (torch.linalg.pinv(H.double()).float() @ target_sum)
 
 
+def _projection(n_params: int, seed: int) -> torch.Tensor:
+    return torch.randn(n_params, PROJ_DIM, generator=torch.Generator().manual_seed(seed)) / PROJ_DIM**0.5
+
+
+def diffusion_square_features(policy, obs: torch.Tensor, chunks: torch.Tensor, P: torch.Tensor,
+                              gen: torch.Generator) -> torch.Tensor:
+    """(N, d): projected per-sample gradients of the official "square" output, averaged over NUM_TIMESTEPS random
+    timesteps with fresh noise (modelout_functions.py:79-119; gradient_computers.py:110-128)."""
+    den = policy.denoiser
+    params = {k: v.detach() for k, v in den.named_parameters()}
+    abar = policy.alphas_cumprod.detach()
+
+    def f(prm, o, c, ts, nz):
+        ab = abar[ts].reshape(-1, 1, 1)
+        noisy = ab.sqrt() * c.unsqueeze(0) + (1 - ab).sqrt() * nz
+        pred = functional_call(den, prm, (noisy, ts, o.unsqueeze(0).expand(len(ts), -1)))
+        return (pred**2).mean(dim=(1, 2)).mean()  # mean over the chunk, then over timesteps (= averaged grads)
+
+    g = vmap(grad(f), in_dims=(None, 0, 0, 0, 0))
+    out = []
+    for i in range(0, len(obs), DIFF_CHUNK):
+        o, c = obs[i:i + DIFF_CHUNK], chunks[i:i + DIFF_CHUNK]
+        ts = torch.randint(0, int(policy.num_train_timesteps), (len(o), NUM_TIMESTEPS), generator=gen)
+        nz = torch.randn((len(o), NUM_TIMESTEPS, *c.shape[1:]), generator=gen)
+        gi = g(params, o, c, ts, nz)
+        out.append(torch.cat([gi[k].reshape(len(o), -1) for k in params], dim=1) @ P)
+    return torch.cat(out) if out else torch.zeros(0, P.shape[1])
+
+
+def cupid_diffusion_scores(policy, view: DatasetView, rollouts, seed: int) -> tuple[dict[int, float], dict]:
+    """Per-episode CUPID demo-quality scores (net, sum_of_sum) for a diffusion policy."""
+    torch.manual_seed(seed)
+    gen = torch.Generator().manual_seed(seed)
+    n_params = sum(p.numel() for p in policy.denoiser.parameters())
+    P = _projection(n_params, seed)
+    eps = list(view)
+    obs_l, chunk_l = zip(*[policy.make_samples(e.state, e.actions) for e in eps], strict=True)
+    phi = diffusion_square_features(policy, torch.cat(obs_l), torch.cat(chunk_l), P, gen)  # (N, d)
+    H = phi.T @ phi + LAMBDA_REG * torch.eye(PROJ_DIM)
+    n = min(N_ROLLOUTS, rollouts.remaining)
+    res = rollouts.rollout(policy.reseed(seed), rollouts.next_seeds(n))
+    u = torch.zeros(PROJ_DIM)
+    for r in res:
+        if r.length == 0:
+            continue
+        o, c = policy.make_samples(r.states, r.actions)
+        u += (1.0 if r.success else -1.0) * diffusion_square_features(policy, o, c, P, gen).sum(0)
+    per_frame = performance_influence(phi, u, H).numpy()
+    bounds = np.cumsum([0] + [e.length for e in eps])
+    psi = {e.episode_index: float(per_frame[bounds[j]:bounds[j + 1]].sum()) for j, e in enumerate(eps)}
+    return psi, {"family": "diffusion", "n_rollouts": len(res), "n_success": int(sum(r.success for r in res)),
+                 "n_train_samples": int(len(phi)), "n_params": int(n_params)}
+
+
 class StochasticPolicy:
     """a ~ N(mu(s), sigma^2 I) for rollouts (see module docstring)."""
 
@@ -89,7 +160,8 @@ class Cupid(ScoreCleaner):
     requires_rollouts = N_ROLLOUTS
     requires_reference_policy = True
     implementation = "reimplementation"
-    # Toybed sanity failure investigated (PROGRESS.md "CUPID sanity investigation"); outcome (c): unresolved.
+    # Toybed sanity fails on the MLP toybed (outcome (c)) and on the diffusion toybed in its native setting
+    # (D-029: AUROC 0.51-0.52 < 0.8). Stays disabled for every policy family (PROGRESS.md).
     status = "disabled — failed sanity"
     source = ("Agia et al. 2025, arXiv 2506.19121v2 Def. 1, Eqs. 2-5, App. A; ref code (MIT) "
               "github.com/agiachris/cupid@2941eba")
@@ -99,8 +171,11 @@ class Cupid(ScoreCleaner):
         policy = ctx.reference_policy.load()
         policy.eval()
         seed = int(rng.integers(2**31))
+        if getattr(policy, "policy_family", None) == "diffusion":  # native setting (D-029)
+            self._psi, self.diagnostics = cupid_diffusion_scores(policy, view, ctx.rollouts, seed)
+            return super().select(view, budget, rng)
         n_params = sum(p.numel() for p in policy.parameters())
-        P = torch.randn(n_params, PROJ_DIM, generator=torch.Generator().manual_seed(seed)) / PROJ_DIM**0.5
+        P = _projection(n_params, seed)
         eps = list(view)
         S = np.concatenate([e.state for e in eps]).astype(np.float32)
         A = np.concatenate([e.actions for e in eps]).astype(np.float32)

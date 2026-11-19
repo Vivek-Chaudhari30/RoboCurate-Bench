@@ -104,6 +104,8 @@ class GymRolloutBackend:
         for s in seeds:
             env = self.env_factory()
             obs, info = env.reset(seed=int(s))
+            if hasattr(policy, "reset"):  # chunked policies clear their action queue per episode (as LeRobot's reset)
+                policy.reset()
             states, actions, success = [], [], False
             for _ in range(self.max_steps):
                 a = policy.act(obs) if hasattr(policy, "act") else policy(obs)

@@ -330,3 +330,89 @@ def test_fake_context_dataset_root_has_no_labels(tmp_path):
     root = fake_dataset_root(synthetic_view(6), tmp_path)
     assert (root / "meta" / "info.json").exists()
     assert not list(root.rglob("*labels*"))
+
+
+# ------------------------------------------------------------------ CUPID in its native setting (D-029)
+# Diffusion toybed, fixed BEFORE the first CUPID run: 240 clean + 60 wrong-direction demos (a distinct mode),
+# ToyDiffusionPolicy trained 4000 steps (batch 256, lr 1e-3, seed 0). Pass rule (task prompt): AUROC >= 0.8 for the
+# planted demos being ranked most harmful.
+
+DIFF_TOY = {"n_clean": 240, "n_pause": 0, "n_jitter": 0, "n_wrong": 60, "seed": 0}
+
+
+def _auroc_low(scores: dict, labels: dict, pos: str = "wrong", neg: str = "clean") -> float:
+    """P(score of a planted demo < score of a clean demo), ties 1/2 (Mann-Whitney AUROC)."""
+    w = np.array([scores[i] for i in labels if labels[i] == pos])
+    c = np.array([scores[i] for i in labels if labels[i] == neg])
+    return float(np.mean(w[:, None] < c[None, :]) + 0.5 * np.mean(w[:, None] == c[None, :]))
+
+
+def test_auroc_helper():
+    lab = {0: "wrong", 1: "wrong", 2: "clean", 3: "clean"}
+    assert _auroc_low({0: 0.0, 1: 1.0, 2: 2.0, 3: 3.0}, lab) == 1.0
+    assert _auroc_low({0: 2.0, 1: 3.0, 2: 0.0, 3: 1.0}, lab) == 0.0
+    assert _auroc_low({0: 1.0, 1: 1.0, 2: 1.0, 3: 1.0}, lab) == 0.5
+
+
+def test_cupid_diffusion_square_features_match_autograd():
+    """vmap features == per-sample autograd of the official "square" output averaged over the same timesteps."""
+    from toybed.diffusion import ToyDiffusionPolicy
+
+    from robocurate.cleaners.entrants import cupid as CU
+
+    pol = ToyDiffusionPolicy(seed=1)
+    n = sum(p.numel() for p in pol.denoiser.parameters())
+    rng = np.random.default_rng(0)
+    obs = torch.as_tensor(rng.normal(size=(5, 4)).astype(np.float32))
+    ch = torch.as_tensor(rng.uniform(-1, 1, size=(5, 8, 2)).astype(np.float32))
+    P = torch.eye(n)
+    got = CU.diffusion_square_features(pol, obs, ch, P, torch.Generator().manual_seed(7))
+    g = torch.Generator().manual_seed(7)  # replay the same draws (one chunk of <= DIFF_CHUNK samples)
+    ts = torch.randint(0, pol.num_train_timesteps, (5, CU.NUM_TIMESTEPS), generator=g)
+    nz = torch.randn((5, CU.NUM_TIMESTEPS, 8, 2), generator=g)
+    for i in range(5):
+        pol.denoiser.zero_grad()
+        noisy = pol.add_noise(ch[i].expand(CU.NUM_TIMESTEPS, -1, -1), nz[i], ts[i])
+        pred = pol.denoiser(noisy, ts[i], obs[i].expand(CU.NUM_TIMESTEPS, -1))
+        (pred**2).mean(dim=(1, 2)).mean().backward()
+        ref = torch.cat([p.grad.reshape(-1) for p in pol.denoiser.parameters()])
+        torch.testing.assert_close(got[i], ref, rtol=1e-4, atol=1e-6)
+
+
+@pytest.fixture(scope="module")
+def diffusion_toy():
+    from toybed.diffusion import train_diffusion
+
+    view, labels = make_dataset(**DIFF_TOY)
+    d = tempfile.mkdtemp()
+    ref = train_diffusion(view, seed=0).save(d + "/ref")
+    return view, labels, ref
+
+
+@pytest.mark.slow
+def test_diffusion_toybed_premise(diffusion_toy):
+    """The planted wrong-direction mode lowers closed-loop success (2026-11-19: 0.075 vs 1.000, seed 0)."""
+    from toybed.diffusion import ToyDiffusionPolicy, diffusion_success_rate, train_diffusion
+
+    view, labels, ref = diffusion_toy
+    seeds = list(range(900000, 900200))  # disjoint from demo seeds (< 10^4) and curation seeds (5x10^5)
+    with_wrong = diffusion_success_rate(ToyDiffusionPolicy.load(ref), seeds)
+    without = diffusion_success_rate(train_diffusion(view, [i for i in labels if labels[i] != "wrong"], seed=0), seeds)
+    assert without - with_wrong >= 0.3, (with_wrong, without)
+
+
+@pytest.mark.slow
+@pytest.mark.xfail(strict=True, reason="D-029: CUPID with the official diffusion setting (square output, 64 timesteps, "
+                   "d=4000, lambda=0, m=100, net/sum_of_sum) ranks the planted mode at AUROC ~0.52 < 0.8; stays "
+                   "disabled, not tuned (PROGRESS.md 'CUPID diffusion toybed')")
+def test_sanity_cupid_diffusion(diffusion_toy):
+    from toybed.diffusion import ToyDiffusionPolicy
+
+    view, labels, ref = diffusion_toy
+    cl = registry.get("cupid")
+    cl.context = CurationContext(
+        rollouts=RolloutService.from_protocol(PROTO, GymRolloutBackend(PointReachEnv), cap=cl.requires_rollouts),
+        reference_policy=ReferencePolicy(ref, ToyDiffusionPolicy.load))
+    cl.select(view, view.n_episodes // 2, np.random.default_rng(0))
+    assert cl.diagnostics["family"] == "diffusion" and cl.diagnostics["n_rollouts"] == 100
+    assert _auroc_low(cl._psi, labels) >= 0.8
