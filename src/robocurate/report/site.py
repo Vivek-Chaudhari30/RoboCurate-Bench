@@ -13,7 +13,7 @@ import math
 from pathlib import Path
 from typing import Any
 
-from robocurate.report.report import _panels
+from robocurate.report.report import INELIGIBLE, _panels
 
 CSS = """
 :root{--bg:#fcfcfb;--ink:#0b0b0b;--ink2:#52514e;--muted:#898781;--rule:#e1e0d9;--accent:#2a78d6;--warn:#b5462b;
@@ -35,6 +35,8 @@ td{border-bottom:1px solid var(--rule);padding:9px 10px;vertical-align:middle}
 td.num{text-align:right;white-space:nowrap}
 tr.ref td:first-child{color:var(--ink2)}code{font:12px ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--muted)}
 .sig{color:var(--accent);font-weight:600}.ns{color:var(--muted)}.issue{color:var(--warn);font-size:14px;margin:4px 0}
+.inel{border:2px solid var(--warn);color:var(--warn);padding:8px 12px;font-weight:700;margin:8px 0;
+letter-spacing:.02em}.inel span{font-weight:400;color:var(--ink2)}
 .fake{background:var(--warn);color:#fff;padding:10px 16px;font-weight:600;text-align:center;letter-spacing:.02em}
 .wm{position:fixed;inset:0;pointer-events:none;display:flex;align-items:center;justify-content:center;
 font-size:22vw;font-weight:800;color:var(--warn);opacity:.07;transform:rotate(-20deg);z-index:0}
@@ -82,6 +84,9 @@ def render_site_html(a: dict[str, Any]) -> str:
     for task, ptitle, b in _panels(a):
         track = "weighting" if "weighting" in ptitle else "selection"
         P.append(f"<h2>{E(task)} · {E(ptitle.split(' (')[0])}<span class='track'>{track} track</span></h2>")
+        if not b.get("result_eligible", False):
+            why = "; ".join(b.get("eligibility") or ["design not checked"])
+            P.append(f"<div class='inel' role='note'>{E(INELIGIBLE)} <span>— {E(why)}</span></div>")
         for i in b["issues"]:
             P.append(f"<p class='issue'>⚠ {E(i)}</p>")
         comp = {c["name"]: c for c in b["cleaner_vs_placebo"]}

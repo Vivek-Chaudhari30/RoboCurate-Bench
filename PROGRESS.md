@@ -259,6 +259,19 @@ re-executed: MATCH 3/3
 Oracle (reference, D-026 test): +0.197, p = 0.0068, significant. length_heuristic: −0.003, p_holm 0.957, not
 significant. rabc vs its 8 permutations: +0.017, p_holm 0.664. Full vs placebo: not significant. Reproduce MATCH 3/3.
 
+## Report eligibility labels (Step 7 of the D-026 task)
+
+Every selection budget and weighting panel gets `result_eligible` + `eligibility` reasons from
+`report.design_eligibility` (K >= 8 placebo subsets/permutations; every condition and placebo unit with the same
+run count n; n >= 3). Ineligible panels carry "NOT RESULT-ELIGIBLE (design below protocol minimum)" in
+leaderboard.json, report.md, the site (a bordered banner per panel, in addition to the FAKE banner and watermark)
+and the CLI output; `leaderboard.json` also has a top-level `result_eligible`. Tests:
+`test_design_eligibility_rules`, `test_ineligible_designs_labeled_on_report_and_site`,
+`test_balanced_k8_design_is_eligible`. Regenerated fake sites (scratch, not committed):
+`$ROBOCURATE_SCRATCH/site-m1-e2e-d026/index.html` (K = 8, n = 3: both panels eligible, no label) and
+`$ROBOCURATE_SCRATCH/site-m1-e2e-fake/index.html` (old K = 3 selection panel labeled "K = 3 < 8"; its weighting
+panel, K = 8, n = 6 balanced, is eligible).
+
 ## Checker installs (Step 5 of the D-026 task)
 
 Installed 2026-11-19 into the Mac rcb env with exact pins (`pip install` of the four pins below; before/after

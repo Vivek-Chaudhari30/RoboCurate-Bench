@@ -62,6 +62,26 @@ def _consistency(recs: list[dict]) -> list[str]:
     return issues
 
 
+INELIGIBLE = "NOT RESULT-ELIGIBLE (design below protocol minimum)"
+
+
+def design_eligibility(unit_counts: list[int], K: int) -> list[str]:
+    """D-026 design check for one track x budget: K >= 8 placebo subsets / weight permutations and a balanced
+    design n_c = n_p = n >= 3 (every condition and every placebo unit has the same number of runs). Returns the
+    reasons the design is below the protocol minimum (empty = result-eligible)."""
+    from robocurate.config import RESULT_MIN_SUBSETS, SEED_FLOOR
+
+    why = []
+    if K < RESULT_MIN_SUBSETS:
+        why.append(f"K = {K} < {RESULT_MIN_SUBSETS} placebo subsets/permutations")
+    if unit_counts and len(set(unit_counts)) > 1:
+        why.append(f"unbalanced: runs per condition/placebo unit range {min(unit_counts)}..{max(unit_counts)} "
+                   "(D-026 needs n_c = n_p = n)")
+    if unit_counts and min(unit_counts) < SEED_FLOOR:
+        why.append(f"n = {min(unit_counts)} < {SEED_FLOOR} runs per condition")
+    return why
+
+
 def _disabled(name: str) -> str | None:
     from robocurate.cleaners.registry import disabled_reason
 
@@ -187,8 +207,13 @@ def analyze(recs: list[dict], alpha: float = 0.05, n_boot: int = 10_000) -> dict
                                                       "selection", costs)
                 except ValueError as e:
                     issues.append(f"primary test not computable: {e}")
+            counts = [len(v) for k, v in groups.items() if k != "random" and not (
+                k.startswith("cleaner:") and _disabled(k.split(":", 1)[1]))]
+            counts += [len(g) for g in _by_subset(groups.get("random", []))]
+            elig = design_eligibility(counts, n_subsets)
             tinfo["budgets"].append({"budget": b, "issues": issues, "conditions": conditions,
-                                     "cleaner_vs_placebo": comps, "reference_vs_placebo": refs, "mde": mde_v})
+                                     "cleaner_vs_placebo": comps, "reference_vs_placebo": refs, "mde": mde_v,
+                                     "result_eligible": not elig, "eligibility": elig})
         # weighting track (D-020): entrant vs its own permuted-weights placebo; unweighted full data as reference
         wnames = sorted({r["spec"]["condition"]["name"] for r in trs if kind_of(r) == "weighting"})
         for n in [n for n in wnames if _disabled(n)]:
@@ -224,9 +249,14 @@ def analyze(recs: list[dict], alpha: float = 0.05, n_boot: int = 10_000) -> dict
                     comps.append(c)
                     refs += [{**x, "vs": c["name"]} for x in r]
                     mde_v = m
+            counts = [len(v) for v in ent.values()] + [len(g) for n in wnames for g in plac[n]]
+            counts += [len(full)] if full else []
+            elig = design_eligibility(counts, min(len(plac[n]) for n in wnames))
             tinfo["weighting"].append({"budget": 1.0, "issues": issues, "conditions": conds,
-                                       "cleaner_vs_placebo": comps, "reference_vs_placebo": refs, "mde": mde_v})
+                                       "cleaner_vs_placebo": comps, "reference_vs_placebo": refs, "mde": mde_v,
+                                       "result_eligible": not elig, "eligibility": elig})
         out["tasks"].append(tinfo)
+    out["result_eligible"] = all(b.get("result_eligible", False) for _, _, b in _panels(out))
     return out
 
 
@@ -256,6 +286,8 @@ def render_markdown(a: dict[str, Any], plot_name: str | None, n_files: int) -> s
           "placebo runs are SECONDARY diagnostics only.", ""]
     for task, title, b in _panels(a):
         L += [f"## {task} - {title}", ""]
+        if not b.get("result_eligible", False):
+            L += [f"**{INELIGIBLE}**: {'; '.join(b.get('eligibility') or ['design not checked'])}", ""]
         L += [f"- ⚠️ {i}" for i in b["issues"]]
         L += ["| condition | cell | runs | mean success | SD | run-level 95% CI | curation GPU-h |",
               "|---|---|---|---|---|---|---|"]

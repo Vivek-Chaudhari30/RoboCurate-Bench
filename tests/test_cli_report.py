@@ -307,3 +307,46 @@ def test_disabled_entrant_refused_in_grids_and_excluded_from_report(tmp_path, sc
     b = a["tasks"][0]["budgets"][0]
     assert not b["cleaner_vs_placebo"] and all(c["condition"] != "cleaner:length_heuristic" for c in b["conditions"])
     assert any("cleaner:length_heuristic excluded: entrant is disabled — test" in i for i in b["issues"])
+
+
+def test_design_eligibility_rules():
+    assert R.design_eligibility([3] * 12, 8) == []
+    assert R.design_eligibility([5] * 12, 12) == []
+    assert any("K = 3 < 8" in w for w in R.design_eligibility([3] * 6, 3))
+    assert any("unbalanced" in w for w in R.design_eligibility([3, 3, 2, 3], 8))
+    assert any("n = 2 < 3" in w for w in R.design_eligibility([2] * 10, 8))
+
+
+def test_ineligible_designs_labeled_on_report_and_site(tmp_path, scratch_env, capsys):
+    """K = 3 (and 6 seeds everywhere) is below D-026's minimum: every panel carries the NOT RESULT-ELIGIBLE label in
+    leaderboard.json, report.md, the site and the CLI output, in addition to the FAKE watermark."""
+    out = _fake_e2e(tmp_path, scratch_env, oracle=0.25, length=0.0)
+    site = tmp_path / "site"
+    assert cli.main(["report", str(out), "--n-boot", "200", "--site", str(site)]) == 0
+    printed = capsys.readouterr().out
+    lb = json.loads((out / "leaderboard.json").read_text())
+    b = lb["tasks"][0]["budgets"][0]
+    assert b["result_eligible"] is False and any("K = 3 < 8" in w for w in b["eligibility"])
+    assert lb["result_eligible"] is False
+    label = R.INELIGIBLE
+    assert label == "NOT RESULT-ELIGIBLE (design below protocol minimum)"
+    assert label in (out / "report.md").read_text() and label in printed
+    html = (site / "index.html").read_text()
+    assert label in html and "FAKE RESULTS" in html
+
+
+def test_balanced_k8_design_is_eligible(tmp_path, scratch_env):
+    """A balanced K = 8, n = 3 fake grid is result-eligible (no label), selection and weighting panels alike."""
+    from helpers import FAKE
+
+    cfg = _k8_cfg(tmp_path, weighting=True)
+    cfg["fake"].write_text(FAKE.format(length=0.0, oracle=0.25, sleep=0.0).replace(
+        "train_seeds: [0, 1, 2, 3, 4, 5]", "train_seeds: [0, 1, 2]"))
+    out, sel = tmp_path / "res", tmp_path / "sel"
+    assert cli.main(["prepare", str(cfg["grid"]), "--backend", "fake", "--selections-dir", str(sel)]) == 0
+    assert cli.main(["run", str(cfg["grid"]), "--backend", "fake", "--fake-params", str(cfg["fake"]),
+                     "--results-dir", str(out), "--selections-dir", str(sel)]) == 0
+    a = R.analyze(results.load_dir(out), n_boot=200)
+    panels = R._panels(a)
+    assert len(panels) == 2 and all(b["result_eligible"] for _, _, b in panels) and a["result_eligible"]
+    assert R.INELIGIBLE not in R.render_markdown(a, None, 1)

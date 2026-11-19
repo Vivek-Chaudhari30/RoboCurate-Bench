@@ -147,6 +147,10 @@ def cmd_report(args) -> int:
 
     for task, title, b in _panels(a):
         print(f"task {task} {title}:")
+        if not b.get("result_eligible", False):
+            from robocurate.report.report import INELIGIBLE
+
+            print(f"  *** {INELIGIBLE}: {'; '.join(b.get('eligibility') or [])} ***")
         for c in b["conditions"]:
             print(f"  {c['condition']:<28} runs={c['n_runs']:<3} mean={c['mean']:.3f}  cell {c['cell_id']}")
         for c in b["cleaner_vs_placebo"]:
