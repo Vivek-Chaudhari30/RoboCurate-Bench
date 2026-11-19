@@ -1,5 +1,134 @@
 # PROGRESS
 
+## Morning summary (non-GPU completion)
+
+Overnight 2, 2026-11-19 16:32Z to 19:25Z (about 2.9 h of the 10 h budget). Branch `m1-core`, pushed after
+every item. CPU only: `CUDA_VISIBLE_DEVICES=""`, MPS fallback off, `--policy.device=cpu`. No hokkaido, no ssh.
+GPU-h 0. Nothing launched, published or deployed; no FROZEN, no tags. m0-calibration was not touched (`0218b8c`).
+**main was fast-forwarded to `8502d86`** after item 11 went fully green (`ee06c92..8502d86`, pushed). This summary
+commit lands on m1-core only.
+
+**Items: 13 of 13 done, 0 blocked, 0 skipped.**
+
+B-007 (huggingface.co failing TLS from this network, 18:35–19:18Z) delayed the integration suite and the
+Task A CPU-part build. Both completed once the Hub came back. TLS was never bypassed.
+
+| item | commits |
+|---|---|
+| 1 decisions D-027..D-032, protocol seeds 2000–2011 / 3000–3011 | `49149cf` |
+| 2 D-028 progress-curve placebo through LeRobot RA-BC; B-005 closed | `3d5364d` |
+| 3 CUPID diffusion toybed: FAIL, stays disabled | `7338ce3` |
+| bug fix: calibration evals used EVAL seeds (D-017 / rule 10 violation, never executed) | `268bfc3` |
+| 4 Task B (D-030) + 5 Task A mixture v1 (D-031) + M0 K-subset design | `0a70343`, `fdafefc` |
+| 6 launch kit + dry run | `e824970` |
+| 7 pre-registration draft + outcome labels in the report | `cbcc970` |
+| 8 verified references | `40135a6` |
+| 9 external submission path | `06e8aa1` |
+| 10 packaging + Space prep | `20ebbd6` |
+| 11 final verification; Task A v1 CPU part built; B-007 resolved | `8502d86` |
+| 12 main fast-forward | main `ee06c92..8502d86` |
+| 13 this summary | (this commit) |
+
+**Tests (Mac, CPU, final):**
+- CI default (`not gpu and not slow and not integration`): **260 passed, 1 skipped, 1 xfailed**. The skip is the
+  PushT env test, because gym-pusht is not in the lock; it passes in the scratch venv. The xfail is CUPID on the
+  MLP toybed.
+- slow: **18 passed, 1 xfailed**: CUPID diffusion, strict; 23 min. Includes the Task B fake end-to-end, the
+  diffusion premise, the template/CI submit end-to-ends and the D-026 null calibration.
+- gpu: **2 skipped** (no CUDA; they run only in launch-kit stage c).
+- integration: **4 passed**: run at 19:18Z, once the Hub was reachable again.
+- ruff: clean.
+
+**Fake end-to-end (FAKE numbers):**
+- **Task A** (`task_a_v1`: 84 runs, every entrant, RA-BC vs 8 D-028 permutations):
+  - oracle +0.305 (p = 2e-5), significant;
+  - all entrants null, labelled inconclusive (MDE 0.15);
+  - RA-BC −0.046 (p_holm 0.34);
+  - reproduce MATCH 3/3 for length_heuristic and for the weighting cell.
+- **Task B** (`pusht_diffusion_v0`: 57 runs):
+  - oracle +0.285 (p = 3e-4);
+  - entrants null;
+  - reproduce MATCH 3/3 (deminf).
+
+**Task B decision: PushT + Diffusion Policy.** All three D-030 checks pass on CPU.
+- `lerobot/pusht` @7628202a loads as v3.0 without conversion (206 episodes, 25,650 frames, fps 10).
+- LeRobot's env factory resets and renders PushT on CPU (pixels 96x96, render 384x384).
+- A 2-step CPU diffusion checkpoint, built by our train builder, runs through `lerobot-eval` (our eval builder,
+  calibration seed block).
+- How the checks ran: lerobot's `pusht` extra and diffusers are not installed or locked. To keep the rcb env and
+  `requirements.lock` unchanged, they were installed into a scratch venv layered on rcb.
+- No weighting track for Task B: RA-BC needs `chunk_size`, which Diffusion Policy lacks.
+
+**Task A mixture v1 (D-031):** `configs/mixtures/task_a_v1.yaml`. Its rates are taken from the measured data:
+pauses at rate 0.50 lasting 0.62–1.20 s, duplicates at rate 0, no wrong-task strings.
+- **Built on CPU:** the 90-episode part (40 scripted + 50 human) is materialized as a LeRobot dataset with
+  video (140 MB, 301 s) and its labels sidecar. `validate-defects` on it: interior pause rate 0.50 and median
+  0.94 s, both at the community medians; jitter 0; 0 exact duplicates. Two differences from community data: no
+  boundary idle, and 2 scripted near-duplicate pairs.
+- **Deferred to the GPU phase:**
+  - 10 replay-mode scripted episodes. No scripted transfer-cube policy exists in gym-aloha 0.1.5 or lerobot
+    0.6.1, so the generation path was implemented and toybed-tested instead. Measured intensities: jitter σ
+    0.173–0.726 rad, matching community HF share 0.10–0.41; failed grasp from frame 135.
+  - 100 policy rollouts.
+
+**CUPID (D-029): fails in its native setting; stays disabled everywhere.**
+- **Premise holds:** a diffusion toybed with 300 demos (60 of them a wrong-direction mode) succeeds 0.07 with all
+  data vs 1.00 without the wrong mode.
+- **Fails the bar:** the official settings (square output, 64 timesteps, d = 4000, λ = 0, m = 100, net/sum_of_sum;
+  agiachris/cupid@2941eba) give AUROC 0.52 (0.51–0.52 over 3 seeds; TRAK's exact float32 inverse gives
+  0.48–0.50) against the 0.8 bar.
+- **Diagnostic only:** the Gram matrix is numerically singular. Damping recovers the signal (λ = 100: 0.82; H ≈ I:
+  1.00). The README states the ACT finding as a limitation of influence methods on unimodal policies.
+
+**Launch kit dry run: PASS** (output in "Launch kit" below). Both tasks complete stages a–f with the fake
+backend and a temp scratch:
+- the GPU wait;
+- the I/O check (doubles num_workers 4 → 8);
+- autoconf (eval batch 25 because batch 50 exceeds 12 GB; S capped at 64,700);
+- 11 runs with packing;
+- the power table and proposal.
+
+Resume works, the real-run guard refuses a non-D-027 scratch, and commits are printed, not executed. Rollouts
+(fake) give the two deferred sources disjoint curation seeds.
+
+**PyPI:** `robocurate-bench` and `robocurate` both return 404, so both are free. Build + `twine check` PASSED for
+0.0.1; the wheel holds only `robocurate`, and the sdist is pruned to src.
+
+**Unverified references:** QoQ official code (none found). Everything else was verified, and CuraEval exists
+(arXiv 2610.38221, CoRL 2026 workshop).
+
+**Decisions needed from Vivek:**
+1. Review and tag `prereg-v1` (docs/preregistration.md; D-032).
+2. Task B extras on hokkaido: pin lerobot[pusht] (gym-pusht 0.1.8, pymunk 6.11.1) and diffusers 0.39.0 in the
+   lock.
+3. D-027 vs D-031: the kit keeps the 10/30/60% checkpoints of the M0 full-data seed-1000 run as rollout sources.
+   D-027 says only final checkpoints are kept. Approve the exception?
+4. The rollout source is the M0 checkpoints, trained on human-only data. Is that the intended "full-data ACT"?
+5. Task B eval batch invariance: diffusion inference is stochastic, so stage c may fail for Task B. If it does,
+   fix one eval batch size per task?
+6. CUPID: keep disabled (the default), or define a damped variant as a separate, pre-registered entrant? That
+   would be a deviation from the published defaults.
+7. Approve the Task B mixture proposal (all 206 human + 100 rollouts) and the jitter calibration statistic (HF
+   share; σ up to 0.73 rad is strong).
+8. Confirm that Task A's M0 config gained the K = 4 × 2-seed block. It had only full × 3; the prompt's M0 design
+   includes K = 4 × 2.
+9. Packaging: add a LICENSE file and switch to an SPDX license string (setuptools deprecation, 2027-02).
+10. GPU-phase pieces not yet built:
+    - `prepare --backend local`;
+    - a LeRobot rollout adapter that records camera frames;
+    - a scripted transfer-cube policy.
+11. Bug found and fixed: calibration evals would have used EVAL seeds (`runs/backends/local.py`). It never ran
+    (M0 never launched) and now has a regression test. Please confirm no other copy of the kit predates
+    `268bfc3`.
+
+**Exact GPU-phase starting point** (docs/runbook_gpu.md section 6), on hokkaido:
+1. `mkdir -p /share/datasets/robocurate && df -h /share/datasets/robocurate`.
+2. In `scripts/env.sh`, set `ROBOCURATE_SCRATCH=/share/datasets/robocurate` and drop the CPU-only line, once the
+   task allows GPU use.
+3. `tmux new -s rcb-m0`.
+4. `source scripts/env.sh && scripts/m0_pipeline.sh --task a`.
+
+
 ## Status 2026-11-19 (D-026 task, branch m1-core)
 
 Commits on m1-core (pushed): `0003aa3` D-026 test + refusals + tables; `2fec523` D-025 placebo; `cb3a8d2` CUPID
@@ -46,6 +175,7 @@ Start 2026-11-19T16:32Z (`caffeinate -dims -t 43200`). Env: rcb (py3.12, lerobot
 | 2026-11-19T18:50Z | 9 submission path | .github/ISSUE_TEMPLATE/cleaner_submission.yml (issue form), .github/workflows/submit.yml (PR paths submissions/** examples/**; read-only; runs scripts/ci_submit.py -> job summary), scripts/ci_submit.py, submissions/README.md, docs/submit.md sections 5-6 (flow; D-026 replaces the stale D-016 text) | tests/test_ci_submit.py 4 passed (incl. slow end-to-end: venv + pip -e template + submit -> PASS table) | done; workflow logic tested locally against examples/cleaner_template (not run on GitHub) |
 | 2026-11-19T18:52Z | 10 packaging + Space | PyPI robocurate-bench and robocurate both 404 (free); build + twine check PASSED (0.0.1; wheel = robocurate only; MANIFEST.in prunes sdist to src); space/ static Space (keys per hub-docs@37ae8ca8); report --site Space-aware, refuses FAKE | tests/test_space.py 3 passed; ruff clean | done; nothing uploaded or deployed |
 | 2026-11-19T19:24Z | 11 final verification | all suites + fake e2e both launch grids (weighting track, reproduce one cell per task) + Task A v1 CPU-part build (after the Hub came back) | CI 260 passed + 1 skipped + 1 xfailed; slow 18 passed + 1 xfailed; integration 4 passed; gpu 2 skipped; ruff clean | fully green; B-007 resolved |
+| 2026-11-19T19:25Z | 12-13 main ff + summary | main fast-forwarded ee06c92..8502d86 and pushed (ancestor verified); morning summary at the top of PROGRESS.md | n/a | done |
 <!-- ng-log -->
 
 ## Previous status (B-003/M0-launch task, STOPPED at Step 1, B-004; superseded by D-026)
