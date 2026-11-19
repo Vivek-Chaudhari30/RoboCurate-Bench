@@ -274,3 +274,117 @@ def build_mixture(recipe_path: str | Path, root: str | Path | None = None, overw
         out.finalize()
     write_labels(labels_for(recipe, plan), sidecar_path(root))
     return root
+
+
+# ---------------------------------------------------------------------------- policy-rollout source (item 6)
+#
+# Rolls out given policy checkpoints (e.g. full-data checkpoints at different training stages) on CURATION seeds,
+# optionally with replay-mode Perturbations executed in the env (D-011: observations follow the executed
+# actions), and records the episodes as a LeRobot dataset + labels sidecar (source "policy", checkpoint step,
+# success, perturbations). Seeds are taken from the TOP of protocol.curation_seed_range downward, so they never
+# collide with cleaner rollouts, which take curation seeds from the bottom up (curation/rollouts.next_seeds).
+# NOT run on real checkpoints in this milestone (toybed only).
+
+PERTURBATIONS: dict[str, type] = {"jitter": D.Jitter, "gripper_drop": D.GripperDrop, "hesitation": D.Hesitation}
+
+
+@dataclass(frozen=True)
+class PolicySource:
+    name: str
+    checkpoint: str
+    checkpoint_step: int
+    n_episodes: int
+    perturbations: tuple[dict, ...] = ()  # e.g. ({"type": "jitter", "sigma": 0.3, "onset": 5, "duration": 10},)
+
+
+@dataclass
+class PolicyEpisode:
+    source: PolicySource
+    seed: int
+    states: np.ndarray
+    actions: np.ndarray
+    success: bool
+
+    @property
+    def perturbation_names(self) -> tuple[str, ...]:
+        return tuple(sorted({p["type"] for p in self.source.perturbations}))
+
+
+def make_perturbations(specs: tuple[dict, ...]) -> list:
+    out = []
+    for sp in specs:
+        sp = dict(sp)
+        t = sp.pop("type")
+        if t not in PERTURBATIONS:
+            raise ConfigError(f"unknown perturbation {t!r}; allowed {sorted(PERTURBATIONS)}")
+        out.append(PERTURBATIONS[t](**sp))
+    return out
+
+
+def policy_rollout_seeds(protocol: Any, n: int) -> list[int]:
+    lo, hi = protocol.curation_seed_range
+    if n > hi - lo + 1:
+        raise ConfigError("not enough curation seeds")
+    seeds = list(range(hi, hi - n, -1))
+    e0, e1 = protocol.eval_seed_range()
+    if any(e0 <= s < e1 for s in seeds):
+        raise ConfigError("policy-rollout seeds overlap eval seeds")
+    return seeds
+
+
+def collect_policy_episodes(sources: list[PolicySource], load_policy, env_factory, protocol: Any,
+                            max_steps: int) -> list[PolicyEpisode]:
+    """load_policy(source) -> callable obs -> action; env_factory() -> gym-style env (info['is_success'])."""
+    seeds = policy_rollout_seeds(protocol, sum(s.n_episodes for s in sources))
+    out, k = [], 0
+    for src in sources:
+        base = load_policy(src)
+        for _ in range(src.n_episodes):
+            seed = seeds[k]
+            k += 1
+            pol = D.PerturbedPolicy(base, make_perturbations(src.perturbations), seed=seed)
+            env = env_factory()
+            obs, _ = env.reset(seed=seed)
+            states, actions, success = [], [], False
+            for _ in range(max_steps):
+                a = np.asarray(pol(obs), dtype=np.float32)
+                states.append(np.asarray(obs, dtype=np.float32))
+                actions.append(a)
+                obs, _, term, trunc, info = env.step(a)
+                success = success or bool(info.get("is_success", False))
+                if term or trunc:
+                    break
+            out.append(PolicyEpisode(src, seed, np.array(states), np.array(actions), success))
+    return out
+
+
+def write_policy_dataset(episodes: list[PolicyEpisode], repo_id: str, root: str | Path, fps: int, task: str,
+                         shuffle_seed: int) -> Path:
+    """LeRobot dataset (no video) + labels sidecar. Episode order shuffled by shuffle_seed (D-021)."""
+    from lerobot.datasets.lerobot_dataset import LeRobotDataset
+
+    root = Path(root)
+    if root.exists():
+        raise FileExistsError(f"{root} exists")
+    sd, ad = episodes[0].states.shape[1], episodes[0].actions.shape[1]
+    features = {"observation.state": {"dtype": "float32", "shape": (sd,), "names": None},
+                "action": {"dtype": "float32", "shape": (ad,), "names": None}}
+    ds = LeRobotDataset.create(repo_id=repo_id, fps=fps, features=features, root=root, use_videos=False)
+    order = np.random.default_rng(shuffle_seed).permutation(len(episodes))
+    labels = []
+    try:
+        for out_i, j in enumerate(order):
+            ep = episodes[int(j)]
+            for s, a in zip(ep.states, ep.actions, strict=True):
+                ds.add_frame({"task": task, "observation.state": s, "action": a})
+            ds.save_episode()
+            names = ep.perturbation_names
+            labels.append(EpisodeLabel(out_i, "policy", ep.source.checkpoint, ep.seed, defects=names,
+                                       quality_tier=max([DEFECT_TIER[d] for d in names] or ["clean"], key=TIERS.index),
+                                       checkpoint_step=ep.source.checkpoint_step, success=ep.success,
+                                       perturbations=names))
+    finally:
+        ds.finalize()
+    write_labels(LabelsSidecar(dataset=repo_id, recipe_sha256="policy-source", seed=shuffle_seed, episodes=labels),
+                 sidecar_path(root))
+    return root

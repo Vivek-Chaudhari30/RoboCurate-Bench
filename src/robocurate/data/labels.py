@@ -27,6 +27,10 @@ class EpisodeLabel:
     source_episode: int
     defects: tuple[str, ...] = ()
     quality_tier: str = "clean"
+    # policy-rollout source only (m1-core item 6); None / () for demonstration sources
+    checkpoint_step: int | None = None
+    success: bool | None = None
+    perturbations: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if self.source not in SOURCES:
@@ -72,7 +76,8 @@ def load_labels(path: str | Path) -> LabelsSidecar:
     d = json.loads(Path(path).read_text())
     if d.get("schema_version") != SCHEMA_VERSION:
         raise ValueError(f"{path}: unsupported labels schema {d.get('schema_version')}")
-    eps = [EpisodeLabel(**{**e, "defects": tuple(e["defects"])}) for e in d["episodes"]]
+    eps = [EpisodeLabel(**{**e, "defects": tuple(e["defects"]), "perturbations": tuple(e.get("perturbations", ()))})
+           for e in d["episodes"]]
     idx = [e.episode_index for e in eps]
     if idx != list(range(len(idx))):
         raise ValueError(f"{path}: episode indices must be 0..n-1 in order")
