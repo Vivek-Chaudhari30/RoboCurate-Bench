@@ -331,8 +331,8 @@ def build_mixture(recipe_path: str | Path, root: str | Path | None = None, overw
 # Rolls out given policy checkpoints (e.g. full-data checkpoints at different training stages) on CURATION seeds,
 # optionally with replay-mode Perturbations executed in the env (D-011: observations follow the executed
 # actions), and records the episodes as a LeRobot dataset + labels sidecar (source "policy", checkpoint step,
-# success, perturbations). Seeds are taken from the TOP of protocol.curation_seed_range downward, so they never
-# collide with cleaner rollouts, which take curation seeds from the bottom up (curation/rollouts.next_seeds).
+# success, perturbations). Seeds come from protocol.generation_seed_range (D-034), so they never
+# collide with cleaner rollouts (curation seeds, curation/rollouts.next_seeds) or eval/calibration seeds.
 # NOT run on real checkpoints in this milestone (toybed only).
 
 PERTURBATIONS: dict[str, type] = {"jitter": D.Jitter, "gripper_drop": D.GripperDrop, "hesitation": D.Hesitation}
@@ -372,11 +372,15 @@ def make_perturbations(specs: tuple[dict, ...]) -> list:
 
 
 def policy_rollout_seeds(protocol: Any, n: int, offset: int = 0) -> list[int]:
-    """n curation seeds from the TOP of the range downward, skipping the first `offset` (earlier deferred sources)."""
-    lo, hi = protocol.curation_seed_range
+    """n data-generation seeds (D-034: protocol.generation_seed_range, from the bottom up), skipping the first
+    `offset` (earlier deferred sources)."""
+    rng = getattr(protocol, "generation_seed_range", None)
+    if not rng:
+        raise ConfigError("protocol.generation_seed_range is required for data-generation rollouts (D-034)")
+    lo, hi = rng
     if offset < 0 or n + offset > hi - lo + 1:
-        raise ConfigError("not enough curation seeds")
-    seeds = list(range(hi - offset, hi - offset - n, -1))
+        raise ConfigError("not enough generation seeds")
+    seeds = list(range(lo + offset, lo + offset + n))
     e0, e1 = protocol.eval_seed_range()
     if any(e0 <= s < e1 for s in seeds):
         raise ConfigError("policy-rollout seeds overlap eval seeds")
@@ -446,7 +450,7 @@ def write_policy_dataset(episodes: list[PolicyEpisode], repo_id: str, root: str 
 
 def deferred_seed_offset(recipe: Recipe, name: str) -> int:
     """Curation-seed offset of a deferred source: the episodes of the deferred sources listed before it, so two
-    GPU-phase sources never share a seed (both take seeds from the top of curation_seed_range)."""
+    GPU-phase sources never share a seed (both take seeds from generation_seed_range, D-034)."""
     off = 0
     for x in recipe.deferred_sources:
         if x["name"] == name:

@@ -64,12 +64,17 @@ def test_deferred_sources_validated(tmp_path, deferred, msg):
         M.Recipe.load(p)
 
 
-def test_deferred_sources_never_share_curation_seeds():
+def test_deferred_sources_use_disjoint_generation_seeds():
+    """D-034: data-generation rollouts use generation_seed_range, never curation, eval or calibration seeds."""
     r = M.Recipe.load(REPO / "configs/mixtures/task_a_v1.yaml")
     a = M.policy_rollout_seeds(PROTO, 10, M.deferred_seed_offset(r, "scripted_replay"))
     b = M.policy_rollout_seeds(PROTO, 100, M.deferred_seed_offset(r, "policy_rollouts"))
-    lo, hi = PROTO.curation_seed_range
-    assert not set(a) & set(b) and a[0] == hi and min(b) >= lo
+    lo, hi = PROTO.generation_seed_range
+    assert (lo, hi) == (700000, 799999) and not set(a) & set(b) and a[0] == lo and max(b) <= hi
+    c0, c1 = PROTO.curation_seed_range
+    assert not any(c0 <= s <= c1 for s in a + b)
+    k0, k1 = PROTO.calibration_seed_range()
+    assert not any(k0 <= s < k1 for s in a + b)
     e0, e1 = PROTO.eval_seed_range()
     assert not any(e0 <= s < e1 for s in a + b)
 

@@ -1,5 +1,15 @@
 # PROGRESS
 
+## CPU completion 2 log (overnight 3, branch m1-core, CPU only, no MPS, no hokkaido; GPU-h 0)
+
+Start 2026-11-19T21:23Z (`caffeinate -dims -t 43200`). huggingface.co unreachable at start (HTTP 000; B-007 again);
+retried later, items that need the Hub continue when it is back.
+
+| UTC | item | what changed | tests | outcome |
+|---|---|---|---|---|
+| 2026-11-19T21:25Z | 1 decisions | D-033..D-038 appended verbatim; protocol.yaml generation_seed_range [700000, 799999] (D-034) and eval_batch_size {pusht_diffusion: TBD} (D-035); ProtocolConfig fields + disjointness check + task_eval_batch_size(); data-generation rollouts (mixture.policy_rollout_seeds) moved from curation seeds to generation seeds | default 260 passed + 1 skipped + 1 xfailed (2 seed tests updated, 2 new protocol tests); ruff clean | done |
+<!-- cpu2-log -->
+
 ## Morning summary (non-GPU completion)
 
 Overnight 2, 2026-11-19 16:32Z to 19:25Z (about 2.9 h of the 10 h budget). Branch `m1-core`, pushed after

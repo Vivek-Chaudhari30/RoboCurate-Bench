@@ -14,3 +14,6 @@ test: d026_balanced           # D-026 (supersedes D-002/D-016): exact balanced p
 tie_break_salt: "46324cdb15ee2629d87e143bdb0d4fe1"   # D-021: selection ties broken by sha256(salt || episode content hash); generated once
 weight_permutation_seeds: [3000, 3001, 3002, 3003, 3004, 3005, 3006, 3007, 3008, 3009, 3010, 3011]   # D-020/D-028 weighting-track placebo
 max_curation_rollouts: 100     # D-022 per (task, budget, replicate), curation seeds only
+generation_seed_range: [700000, 799999]   # D-034: data-generation rollouts (mixture sources) only; disjoint from all others
+eval_batch_size:                # D-035: fixed per DIFFUSION task (stochastic sampling); written by M0 stage d, frozen with eval-v1
+  pusht_diffusion: TBD

@@ -29,8 +29,8 @@ SOURCES = [
 def test_policy_source_end_to_end(tmp_path, scratch_env):
     eps = M.collect_policy_episodes(SOURCES, _load, PointReachEnv, PROTO, max_steps=60)
     assert len(eps) == 10
-    lo, hi = PROTO.curation_seed_range
-    assert [e.seed for e in eps] == list(range(hi, hi - 10, -1))  # top of the curation range, never eval seeds
+    lo, hi = PROTO.generation_seed_range
+    assert [e.seed for e in eps] == list(range(lo, lo + 10))  # D-034 generation seeds, never eval/curation seeds
     assert all(e.success for e in eps[:4]) and not any(e.success for e in eps[7:])
     clean = M.collect_policy_episodes(SOURCES[:1], _load, PointReachEnv, PROTO, max_steps=60)[0]
     jit = eps[4]
