@@ -113,7 +113,7 @@ def test_protocol_tbd_result_mode_raises(tmp_path):
         (("n_eval_rollouts: 200", "n_eval_rollouts: 50"), ">= 200"),
         (("checkpoint_rule: final", "checkpoint_rule: best"), "D-003"),
         (("random_subset_seeds: [2000, 2001, 2002]", "random_subset_seeds: [2000]"), ">= 3"),
-        (("n_train_seeds: TBD\ntrain_seeds: TBD", "n_train_seeds: 2\ntrain_seeds: [1, 2]"), "floor is 3"),
+        (("n_train_seeds: TBD\ntrain_seeds: TBD", "n_train_seeds: 3\ntrain_seeds: [1, 2, 3]"), "floor is 6"),
         (("curation_seed_range: [500000, 599999]", "curation_seed_range: [100100, 200000]"), "overlap"),
         (("test: welch_holm", "test: binomial"), "D-002"),
     ],

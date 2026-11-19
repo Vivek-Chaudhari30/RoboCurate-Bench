@@ -19,6 +19,8 @@ from typing import Any, Literal
 
 import yaml
 
+SEED_FLOOR = 6  # D-015 (Welch + Holm needs >= 6 runs per condition to hold the null FWER)
+
 Mode = Literal["result", "calibration", "fake", "plan"]
 MODES: tuple[str, ...] = ("result", "calibration", "fake", "plan")
 
@@ -197,8 +199,8 @@ class ProtocolConfig(_Guarded):
         if ts is not TBD:
             if nts is TBD or len(ts) != nts:
                 raise ConfigError("train_seeds length must equal n_train_seeds")
-            if nts < 3:
-                raise ConfigError("n_train_seeds floor is 3 (D-005)")
+            if nts < SEED_FLOOR:
+                raise ConfigError(f"n_train_seeds floor is {SEED_FLOOR} (D-015)")
         if g("test") != "welch_holm":
             raise ConfigError("test must be 'welch_holm' (D-002)")
 
