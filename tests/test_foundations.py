@@ -252,3 +252,58 @@ def test_repo_protocol_calibration_seeds_disjoint():
     e0, e1 = p.eval_seed_range(50)
     assert c1 <= e0 or e1 <= c0
     assert c1 <= p.curation_seed_range[0] or p.curation_seed_range[1] < c0
+
+
+# ------------------------------------------------------------------ D-020 .. D-022 protocol additions
+
+
+def test_repo_protocol_d020_d022_fields():
+    from robocurate.paths import repo_root
+
+    p = C.load_protocol(repo_root() / "configs/protocol.yaml")
+    assert p.weight_permutation_seeds == list(range(3000, 3008))
+    assert p.max_curation_rollouts == 100
+    assert isinstance(p.tie_break_salt, str) and len(p.tie_break_salt) == 32
+    int(p.tie_break_salt, 16)
+
+
+@pytest.mark.parametrize(
+    "extra,msg",
+    [
+        ("max_curation_rollouts: 101\n", "max_curation_rollouts"),
+        ("weight_permutation_seeds: [1, 2, 3]\n", "D-020"),
+        ("weight_permutation_seeds: [1, 1, 2, 3, 4, 5, 6, 7]\n", "D-020"),
+        ("tie_break_salt: abc\n", "D-021"),
+    ],
+)
+def test_protocol_rejects_bad_d020_d022_fields(tmp_path, extra, msg):
+    with pytest.raises(C.ConfigError, match=msg):
+        C.load_protocol(_write(tmp_path, "p.yaml", PROTO + extra))
+
+
+def test_weighting_condition_validation(tmp_path):
+    head = "name: g\ntask: t.yaml\nprotocol: p.yaml\nbudgets: [0.5]\nconditions:\n"
+    ok = head + "  - {kind: full}\n  - {kind: weighting, name: rabc, version: '1', n_permutations: 8}\n"
+    specs = C.load_grid(_write(tmp_path, "ok.yaml", ok)).condition_specs()
+    assert specs[1].kind == "weighting" and specs[1].n_permutations == 8
+    few = ok.replace("n_permutations: 8", "n_permutations: 4")
+    with pytest.raises(C.ConfigError, match="n_permutations"):
+        C.load_grid(_write(tmp_path, "few.yaml", few))
+    nofull = head + "  - {kind: weighting, name: rabc, version: '1', n_permutations: 8}\n"
+    with pytest.raises(C.ConfigError, match="reference"):
+        C.load_grid(_write(tmp_path, "nofull.yaml", nofull))
+
+
+def test_weighting_spec_rules():
+    from robocurate.runs.spec import Condition, RunSpec
+
+    w, wp = Condition.weighting("rabc", "1"), Condition.weight_placebo("rabc", "1")
+    assert w.label == "weighting:rabc" and wp.label == "weight_placebo:rabc"
+    RunSpec("t", w, 1.0, None, 0)
+    RunSpec("t", wp, 1.0, 3, 0)
+    with pytest.raises(ValueError):
+        RunSpec("t", wp, 1.0, None, 0)  # permutation index required
+    with pytest.raises(ValueError):
+        RunSpec("t", w, 0.5, None, 0)  # weighting trains on full data
+    with pytest.raises(ValueError):
+        Condition("weighting")

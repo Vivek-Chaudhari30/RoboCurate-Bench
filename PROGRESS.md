@@ -132,6 +132,15 @@
 7. Cleaner selection rng is seeded by sha256(task|name|version|budget), so one subset per cleaner is shared
    across train seeds (seeds replicate training, not selection). This is what makes question 1 bite.
 
+## Overnight m1-core log (branch m1-core, CPU only, GPU-h 0)
+
+Started 2026-11-19T06:19:12Z. Hokkaido read-only check at start: no tmux session for this user (`error connecting to /tmp//tmux-1176/default`); M0 was never launched (B-003), so there is no m0 log path; GPU in use by another user (66% util, 27584 MiB).
+
+| UTC | Item | Commit | Tests | Outcome |
+|---|---|---|---|---|
+| 2026-11-19T06:21Z | 1 decisions + protocol | (next) | default 152 passed; ruff clean | D-020..D-023 verbatim; protocol: tie_break_salt (secrets.token_hex(16)), weight_permutation_seeds 3000-3007, max_curation_rollouts 100 (validated); weighting condition kind + weight_placebo spec/planner; task_a_v0 weighting example (rabc, 8 permutations) |
+<!-- m1-log-end -->
+
 ## M0 log (branch m0-calibration)
 
 | UTC | Step | Commit | Outcome | GPU-h |

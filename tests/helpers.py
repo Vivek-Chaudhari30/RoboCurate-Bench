@@ -43,7 +43,8 @@ FAKE = """
 base: 0.5
 sigma_seed: 0.06
 train_seeds: [0, 1, 2, 3, 4, 5]
-effects: {{full: 0.0, random: 0.0, "cleaner:length_heuristic": {length}, oracle: {oracle}}}
+effects: {{full: 0.0, random: 0.0, "cleaner:length_heuristic": {length}, oracle: {oracle},
+          "weighting:rabc": 0.0, "weight_placebo:rabc": 0.0}}
 sleep_s: {sleep}
 """
 

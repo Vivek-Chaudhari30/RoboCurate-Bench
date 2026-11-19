@@ -8,3 +8,7 @@ conditions:
   - {kind: random, n_subsets: 3}
   - {kind: cleaner, name: length_heuristic, version: "1"}
   - {kind: oracle}                       # reference condition, not an entrant (D-012)
+  # Weighting track (D-020): per-episode training weights on the full dataset. Placebo = the same weights
+  # randomly permuted across episodes (n_permutations >= 8, seeds = protocol.weight_permutation_seeds);
+  # unweighted full data is the reference.
+  - {kind: weighting, name: rabc, version: "1", n_permutations: 8}

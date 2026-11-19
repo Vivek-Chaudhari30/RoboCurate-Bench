@@ -11,3 +11,6 @@ random_subset_seeds: [2000, 2001, 2002]   # placebo subsets (CLAUDE.md rule 1)
 curation_seed_range: [500000, 599999]     # env seeds for cleaners that roll out policies; disjoint from eval (D-007)
 alpha: 0.05
 test: welch_holm               # D-002
+tie_break_salt: "46324cdb15ee2629d87e143bdb0d4fe1"   # D-021: selection ties broken by sha256(salt || episode content hash); generated once
+weight_permutation_seeds: [3000, 3001, 3002, 3003, 3004, 3005, 3006, 3007]   # D-020 weighting-track placebo
+max_curation_rollouts: 100     # D-022 per (task, budget, replicate), curation seeds only

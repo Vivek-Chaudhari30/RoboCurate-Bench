@@ -66,8 +66,11 @@ class Plan:
         ]
 
     def subset_seed(self, spec: RunSpec) -> int | None:
+        """Random-subset seed (random) or weight-permutation seed (weight_placebo, D-020)."""
         if spec.subset_index is None:
             return None
+        if spec.condition.kind == "weight_placebo":
+            return self.protocol.weight_permutation_seeds[spec.subset_index]
         return self.protocol.random_subset_seeds[spec.subset_index]
 
     def summary_lines(self) -> list[str]:
@@ -95,6 +98,14 @@ def build_units(grid: GridConfig, protocol: ProtocolConfig) -> list[Unit]:
     specs = grid.condition_specs()
     if any(c.kind == "full" for c in specs):
         units.append(Unit(Condition.full(), 1.0, None, None))
+    for c in specs:  # weighting track (D-020): full data, budget-independent
+        if c.kind == "weighting":
+            seeds = protocol.weight_permutation_seeds or []
+            if c.n_permutations > len(seeds):
+                raise ConfigError(f"grid asks for {c.n_permutations} weight permutations, protocol has {len(seeds)}")
+            units.append(Unit(Condition.weighting(c.name, c.version), 1.0, None, None))
+            for i in range(c.n_permutations):
+                units.append(Unit(Condition.weight_placebo(c.name, c.version), 1.0, i, seeds[i]))
     for b in grid.budgets:
         for c in specs:
             if c.kind == "random":

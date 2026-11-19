@@ -15,7 +15,7 @@ FIX = Path(__file__).parent / "fixtures"
 def test_plan_real_configs_tbd(capsys):
     assert cli.main(["plan", str(REPO / "configs/grids/task_a_v0.yaml")]) == 0
     out = capsys.readouterr().out
-    assert "runs: 6 cells x TBD seeds = TBD" in out
+    assert "runs: 15 cells x TBD seeds = TBD" in out  # 6 selection + 1 weighting + 8 permutations
     assert "total GPU-h: TBD" in out and "n_train_seeds" in out
 
 

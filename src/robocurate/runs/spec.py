@@ -13,7 +13,10 @@ import json
 from dataclasses import asdict, dataclass
 from typing import Any
 
-CONDITION_KINDS = ("full", "random", "cleaner", "oracle")
+CONDITION_KINDS = ("full", "random", "cleaner", "oracle", "weighting", "weight_placebo")
+NAMED_KINDS = ("cleaner", "weighting", "weight_placebo")  # carry the entrant's name + version
+INDEXED_KINDS = ("random", "weight_placebo")  # carry subset_index (random subset / weight permutation index)
+FULL_DATA_KINDS = ("full", "weighting", "weight_placebo")  # train on all episodes (budget 1.0)
 
 
 @dataclass(frozen=True)
@@ -25,15 +28,15 @@ class Condition:
     def __post_init__(self) -> None:
         if self.kind not in CONDITION_KINDS:
             raise ValueError(f"unknown condition kind {self.kind!r}")
-        if self.kind == "cleaner" and not (self.name and self.version):
-            raise ValueError("cleaner condition needs name and version")
-        if self.kind != "cleaner" and (self.name or self.version):
+        if self.kind in NAMED_KINDS and not (self.name and self.version):
+            raise ValueError(f"{self.kind} condition needs name and version")
+        if self.kind not in NAMED_KINDS and (self.name or self.version):
             raise ValueError(f"{self.kind} condition takes no name/version")
 
     @property
     def label(self) -> str:
         """Grouping label used by the report and fake-effect lookup (version-free)."""
-        return f"cleaner:{self.name}" if self.kind == "cleaner" else self.kind
+        return f"{self.kind}:{self.name}" if self.kind in NAMED_KINDS else self.kind
 
     @classmethod
     def full(cls) -> Condition:
@@ -51,6 +54,15 @@ class Condition:
     def cleaner(cls, name: str, version: str) -> Condition:
         return cls("cleaner", name, str(version))
 
+    @classmethod
+    def weighting(cls, name: str, version: str) -> Condition:
+        return cls("weighting", name, str(version))
+
+    @classmethod
+    def weight_placebo(cls, name: str, version: str) -> Condition:
+        """D-020: the entrant's own weight vector, randomly permuted across episodes."""
+        return cls("weight_placebo", name, str(version))
+
 
 @dataclass(frozen=True)
 class RunSpec:
@@ -61,10 +73,10 @@ class RunSpec:
     train_seed: int
 
     def __post_init__(self) -> None:
-        if (self.condition.kind == "random") != (self.subset_index is not None):
-            raise ValueError("subset_index is set iff the condition is random")
-        if self.condition.kind == "full" and self.budget != 1.0:
-            raise ValueError("full condition has budget 1.0")
+        if (self.condition.kind in INDEXED_KINDS) != (self.subset_index is not None):
+            raise ValueError("subset_index is set iff the condition is random or weight_placebo")
+        if self.condition.kind in FULL_DATA_KINDS and self.budget != 1.0:
+            raise ValueError(f"{self.condition.kind} condition has budget 1.0")
         if not 0 < self.budget <= 1:
             raise ValueError("budget must be in (0, 1]")
 

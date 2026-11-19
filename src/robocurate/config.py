@@ -21,6 +21,7 @@ import yaml
 
 SEED_FLOOR = 6  # D-015 (Welch + Holm needs >= 6 runs per condition to hold the null FWER)
 
+MIN_WEIGHT_PERMUTATIONS = 8  # D-020
 RESULT_MIN_SUBSETS = 8  # D-019: result-mode runs need K >= 8 random subsets per budget
 CALIBRATION_SEED_SPAN = 100_000  # calibration_seed_start .. +SPAN is reserved for calibration evals (D-017)
 
@@ -186,6 +187,9 @@ class ProtocolConfig(_Guarded):
     alpha: float
     test: str
     calibration_seed_start: int | None = None  # D-017; calibration evals only, never eval seeds
+    tie_break_salt: str | None = None  # D-021
+    weight_permutation_seeds: list[int] | None = None  # D-020 weighting-track placebo permutations
+    max_curation_rollouts: int = 100  # D-022 (cap 100, D-007)
     n_random_subsets_min: int = 3
 
     def __post_init__(self) -> None:
@@ -205,6 +209,14 @@ class ProtocolConfig(_Guarded):
                 raise ConfigError("train_seeds length must equal n_train_seeds")
             if nts < SEED_FLOOR:
                 raise ConfigError(f"n_train_seeds floor is {SEED_FLOOR} (D-015)")
+        if not 0 <= g("max_curation_rollouts") <= 100:
+            raise ConfigError("max_curation_rollouts must be in [0, 100] (D-007, D-022)")
+        wps = g("weight_permutation_seeds")
+        if wps is not None and (len(wps) < MIN_WEIGHT_PERMUTATIONS or len(set(wps)) != len(wps)):
+            raise ConfigError(f"weight_permutation_seeds needs >= {MIN_WEIGHT_PERMUTATIONS} distinct seeds (D-020)")
+        salt = g("tie_break_salt")
+        if salt is not None and (not isinstance(salt, str) or len(salt) < 16):
+            raise ConfigError("tie_break_salt must be a fixed hex string of >= 16 chars (D-021)")
         if g("test") != "welch_holm":
             raise ConfigError("test must be 'welch_holm' (D-002)")
 
@@ -273,10 +285,11 @@ def load_task(path: str | Path, mode: Mode = "plan") -> TaskConfig:
 
 @dataclass
 class ConditionSpec:
-    kind: str  # full | random | cleaner | oracle
+    kind: str  # full | random | cleaner | oracle | weighting
     name: str | None = None
     version: str | None = None
     n_subsets: int | None = None  # for random
+    n_permutations: int | None = None  # for weighting (D-020 placebo)
 
 
 @dataclass(repr=False, eq=False)
@@ -298,17 +311,21 @@ class GridConfig(_Guarded):
         for c in object.__getattribute__(self, "conditions"):
             c = dict(c)
             kind = c.pop("kind", None)
-            if kind not in ("full", "random", "cleaner", "oracle"):
+            if kind not in ("full", "random", "cleaner", "oracle", "weighting"):
                 raise ConfigError(f"unknown condition kind {kind!r}")
             spec = ConditionSpec(kind=kind, **c)
-            if kind == "cleaner" and not (spec.name and spec.version):
-                raise ConfigError("cleaner condition needs name and version")
+            if kind in ("cleaner", "weighting") and not (spec.name and spec.version):
+                raise ConfigError(f"{kind} condition needs name and version")
+            if kind == "weighting" and (spec.n_permutations or 0) < MIN_WEIGHT_PERMUTATIONS:
+                raise ConfigError(f"weighting condition needs n_permutations >= {MIN_WEIGHT_PERMUTATIONS} (D-020)")
             if kind == "random" and (spec.n_subsets or 0) < 3:
                 raise ConfigError("random condition needs n_subsets >= 3 (CLAUDE.md rule 1)")
             out.append(spec)
         kinds = [s.kind for s in out]
         if "cleaner" in kinds and not ("random" in kinds and "full" in kinds):
             raise ConfigError("cleaners must be compared to random subsets AND full data (rule 1)")
+        if "weighting" in kinds and "full" not in kinds:
+            raise ConfigError("weighting entrants need unweighted full data as reference (D-020)")
         return out
 
 
