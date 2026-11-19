@@ -31,19 +31,28 @@ class EpisodeData:
     def length(self) -> int:
         return int(self.actions.shape[0])
 
+    def content_hash(self) -> str:
+        """sha256 over task, actions and state bytes. Independent of episode_index (D-021)."""
+        h = hashlib.sha256()
+        h.update(f"{self.task}|{self.actions.shape}|{self.state.shape}|".encode())
+        h.update(np.ascontiguousarray(self.actions).tobytes())
+        h.update(np.ascontiguousarray(self.state).tobytes())
+        return h.hexdigest()
+
 
 class DatasetView:
     """Immutable, label-free view over a dataset's episodes."""
 
-    __slots__ = ("_episodes", "_fps", "_name")
+    __slots__ = ("_episodes", "_fps", "_name", "_salt")
 
-    def __init__(self, episodes: Sequence[EpisodeData], fps: int, name: str = "dataset"):
+    def __init__(self, episodes: Sequence[EpisodeData], fps: int, name: str = "dataset", tie_break_salt: str = ""):
         idx = [e.episode_index for e in episodes]
         if len(set(idx)) != len(idx):
             raise ValueError("duplicate episode_index in view")
         object.__setattr__(self, "_episodes", {e.episode_index: e for e in episodes})
         object.__setattr__(self, "_fps", int(fps))
         object.__setattr__(self, "_name", str(name))
+        object.__setattr__(self, "_salt", str(tie_break_salt))
 
     def __setattr__(self, k, v):  # read-only
         raise AttributeError("DatasetView is read-only")
@@ -57,6 +66,7 @@ class DatasetView:
         fps: int,
         name: str = "dataset",
         episode_indices: Sequence[int] | None = None,
+        tie_break_salt: str = "",
     ) -> DatasetView:
         n = len(actions)
         if not (len(states) == len(tasks) == n):
@@ -67,7 +77,7 @@ class DatasetView:
             if len(a) != len(s):
                 raise ValueError(f"episode {i}: actions and state lengths differ")
             eps.append(EpisodeData(int(i), str(t), _ro(a), _ro(s), _ro(np.arange(len(a)) / fps)))
-        return cls(eps, fps, name)
+        return cls(eps, fps, name, tie_break_salt)
 
     @property
     def name(self) -> str:
@@ -76,6 +86,16 @@ class DatasetView:
     @property
     def fps(self) -> int:
         return self._fps
+
+    @property
+    def tie_break_salt(self) -> str:
+        """protocol.tie_break_salt (D-021); "" only in tests/conformance views."""
+        return self._salt
+
+    def tie_break_key(self, i: int) -> str:
+        """D-021: sha256(salt || episode content hash). Exact-duplicate episodes share a key; among those
+        (identical content) the caller may fall back to episode_index."""
+        return hashlib.sha256((self._salt + self._episodes[i].content_hash()).encode()).hexdigest()
 
     @property
     def n_episodes(self) -> int:

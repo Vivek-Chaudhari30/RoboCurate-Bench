@@ -174,3 +174,21 @@ def test_perturbed_policy_deterministic_and_replay():
     # replay mode: re-executing recorded actions open loop from the same env seed reproduces observations
     t3 = D.rollout(env, D.ReplayPolicy(t1["action"]), 40, seed=0)
     assert np.allclose(t3["observation"], t1["observation"])
+
+
+def test_mixture_order_shuffled_by_recipe_seed():
+    """D-021: source labels are not monotone in output index (the builder shuffles by recipe seed)."""
+    from robocurate.data.mixture import Recipe, SourceSpec, plan_mixture
+
+    r = Recipe(name="m", repo_id="x/m", seed=7,
+               sources=(SourceSpec(source="human", dataset="h", n_episodes=20),
+                        SourceSpec(source="scripted", dataset="s", n_episodes=20)))
+    plan = plan_mixture(r, {"h": [400] * 20, "s": [400] * 20})
+    src = [p.source for p in plan]
+    assert src != sorted(src) and src != sorted(src, reverse=True)
+    first_half_human = sum(s == "human" for s in src[:20])
+    assert 5 <= first_half_human <= 15
+    import dataclasses
+
+    r2 = dataclasses.replace(r, seed=8)
+    assert [p.source for p in plan_mixture(r2, {"h": [400] * 20, "s": [400] * 20})] != src

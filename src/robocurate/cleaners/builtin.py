@@ -23,8 +23,9 @@ class LengthHeuristic(ScoreCleaner):
     """Keep the episodes whose length is nearest the dataset's median episode length.
 
     Rule: score(e) = -|len(e) - median(len)|. Top-`budget` by score; ties (equal distance, e.g. one episode
-    above and one below the median) are broken by lower episode_index. Rationale: pauses/hesitations make
-    episodes long and truncated/failed ones short; the median is a robust "typical" length. rng is unused.
+    above and one below the median) are broken per D-021 (salted content hash, not episode index).
+    Rationale: pauses/hesitations make episodes long and truncated/failed ones short; the median is a robust
+    "typical" length. rng is unused.
     """
 
     name = "length_heuristic"

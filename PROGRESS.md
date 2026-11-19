@@ -139,6 +139,7 @@ Started 2026-11-19T06:19:12Z. Hokkaido read-only check at start: no tmux session
 | UTC | Item | Commit | Tests | Outcome |
 |---|---|---|---|---|
 | 2026-11-19T06:21Z | 1 decisions + protocol | (next) | default 152 passed; ruff clean | D-020..D-023 verbatim; protocol: tie_break_salt (secrets.token_hex(16)), weight_permutation_seeds 3000-3007, max_curation_rollouts 100 (validated); weighting condition kind + weight_placebo spec/planner; task_a_v0 weighting example (rabc, 8 permutations) |
+| 2026-11-19T06:23Z | 2 ordering + ties | (next) | default 155 passed; ruff clean | Mixture builder already shuffles by recipe seed (mixture.py:117 rng.permutation) -> test only. ScoreCleaner tie-break now sha256(salt||content hash) (D-021); old index tie test replaced. Fake e2e rerun (task_a_v0, 90 runs): length_heuristic +0.014 p_holm 0.643 not sig; oracle +0.256 p 4.7e-06 sig; MDE 0.089 (numbers differ from Phase 8 because the protocol hash, hence run_id/fake rng, changed). Weighting group shown but not yet analysed (item 8). |
 <!-- m1-log-end -->
 
 ## M0 log (branch m0-calibration)

@@ -30,15 +30,19 @@ class Cleaner(ABC):
 
 
 class ScoreCleaner(Cleaner):
-    """Score each episode; keep the top `budget` (higher is better), ties broken by episode_index."""
+    """Score each episode; keep the top `budget` (higher is better).
+
+    Ties are broken by sha256(protocol salt || episode content hash) (D-021), never by episode index; only
+    exact-duplicate episodes (identical content, identical key) fall back to episode_index.
+    """
 
     @abstractmethod
     def score(self, episode: EpisodeData) -> float: ...
 
     def select(self, view: DatasetView, budget: int, rng: np.random.Generator) -> list[int]:
-        scored = [(-float(self.score(e)), e.episode_index) for e in view]
+        scored = [(-float(self.score(e)), view.tie_break_key(e.episode_index), e.episode_index) for e in view]
         scored.sort()
-        return sorted(idx for _, idx in scored[:budget])
+        return sorted(idx for _, _, idx in scored[:budget])
 
 
 def budget_count(n_episodes: int, fraction: float) -> int:

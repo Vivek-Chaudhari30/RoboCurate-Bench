@@ -89,7 +89,7 @@ class LocalBackend:
         if self._view is None:
             from robocurate.data.hub import load_view
 
-            self._view = load_view(self.repo_id, self.root)
+            self._view = load_view(self.repo_id, self.root, self.plan.protocol.tie_break_salt or "")
         return self._view
 
     def select(self, spec: RunSpec) -> list[int]:

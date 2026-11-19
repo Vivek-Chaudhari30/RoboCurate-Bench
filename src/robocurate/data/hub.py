@@ -54,7 +54,7 @@ def episode_frame_range(meta, episode_index: int) -> tuple[int, int]:
     )
 
 
-def load_view(repo_id: str, root: str | Path | None = None) -> DatasetView:
+def load_view(repo_id: str, root: str | Path | None = None, tie_break_salt: str = "") -> DatasetView:
     """Label-free DatasetView from parquet rows only (no video download or decode)."""
     ds = load_dataset(repo_id, root=root, download_videos=False)
     cols = (
@@ -75,4 +75,4 @@ def load_view(repo_id: str, root: str | Path | None = None) -> DatasetView:
         for arr in (a, s, ts):
             arr.setflags(write=False)
         episodes.append(EpisodeData(int(e), task_by_index[int(tidx[0])], a, s, ts))
-    return DatasetView(episodes, ds.meta.fps, name=repo_id)
+    return DatasetView(episodes, ds.meta.fps, name=repo_id, tie_break_salt=tie_break_salt)

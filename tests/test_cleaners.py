@@ -38,18 +38,23 @@ def test_length_heuristic_rule_and_ties():
     # median of [10, 20, 30, 40, 50, 100] = 35 -> distances 25,15,5,5,15,65
     v = _view([10, 20, 30, 40, 50, 100])
     assert LengthHeuristic().select(v, 2, np.random.default_rng(0)) == [2, 3]
-    # tie at distance 15 between ep 1 and ep 4 -> lower index wins
-    assert LengthHeuristic().select(v, 3, np.random.default_rng(0)) == [1, 2, 3]
+    # tie at distance 15 between ep 1 and ep 4 -> D-021 salted content hash decides, not the index
+    sel = LengthHeuristic().select(v, 3, np.random.default_rng(0))
+    winner = min((1, 4), key=v.tie_break_key)
+    assert sel == sorted([2, 3, winner])
 
 
-def test_score_cleaner_tie_break_by_index():
+def test_score_cleaner_tie_break_by_content_hash():
+    """D-021 (replaces the old index tie-break): all-equal scores keep the 4 smallest salted content hashes."""
+
     class Const(ScoreCleaner):
         name, version = "c", "1"
 
         def score(self, e):
             return 1.0
 
-    assert Const().select(synthetic_view(10), 4, np.random.default_rng(0)) == [0, 1, 2, 3]
+    v = synthetic_view(10)
+    assert Const().select(v, 4, np.random.default_rng(0)) == sorted(sorted(v.episode_indices, key=v.tie_break_key)[:4])
 
 
 def test_budget_count():
@@ -184,3 +189,45 @@ def test_import_graph_detects_transitive_reach():
 
 def test_data_episodes_is_label_free():
     assert importguard.module_forbidden_reach("robocurate.data.episodes") == []
+
+
+# ------------------------------------------------------------------ D-021 tie-break
+
+
+def _two_source_view(seed, n=40, salt="46324cdb15ee2629d87e143bdb0d4fe1"):
+    """Fixture: episodes 0..n/2-1 come from source A, the rest from source B (source order = index order)."""
+    rng = np.random.default_rng(seed)
+    acts = [rng.normal(size=(50, 4)).astype(np.float32) for _ in range(n)]
+    v = DatasetView.from_arrays(acts, [a.cumsum(0) for a in acts], ["t"] * n, 50, tie_break_salt=salt)
+    source = {i: ("A" if i < n // 2 else "B") for i in range(n)}
+    return v, source
+
+
+class _Flat(ScoreCleaner):
+    name, version = "flat", "1"
+
+    def score(self, episode):
+        return 0.0
+
+
+def test_tie_break_uncorrelated_with_source_order():
+    """All-equal scores: index tie-break would keep exactly source A; D-021 keeps ~half A."""
+    fracs = []
+    for seed in range(60):
+        v, source = _two_source_view(seed)
+        ids = _Flat().select(v, 20, np.random.default_rng(0))
+        assert len(set(ids)) == 20
+        fracs.append(np.mean([source[i] == "A" for i in ids]))
+    assert 0.42 <= float(np.mean(fracs)) <= 0.58
+    assert min(fracs) < 1.0  # index tie-break would give 1.0 every time
+
+
+def test_tie_break_depends_on_salt_and_content_not_index():
+    v, _ = _two_source_view(0, salt="a" * 32)
+    w, _ = _two_source_view(0, salt="b" * 32)
+    assert _Flat().select(v, 20, None) != _Flat().select(w, 20, None)
+    # relabelling the same episodes with shifted indices selects the same content
+    eps = list(v)
+    shifted = DatasetView([type(e)(e.episode_index + 100, e.task, e.actions, e.state, e.timestamps) for e in eps],
+                          50, tie_break_salt="a" * 32)
+    assert [i + 100 for i in _Flat().select(v, 20, None)] == _Flat().select(shifted, 20, None)
