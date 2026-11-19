@@ -1,9 +1,61 @@
 # PROGRESS
 
-**Current milestone: M0 — software core done; next = GPU calibration**
+**Current milestone: M0 — BLOCKED at Part 1 (B-002: D-016 test fails null calibration at K=4); GPU work not started**
 
 ## Blocked
-(none open)
+
+- **B-002 (2026-11-19T05:55Z, OPEN) — the D-016 test as specified fails the Part 1 null calibration at K=4.**
+  Branch `m0-calibration`. Stop condition hit ("Any Part 1 FPR cell exceeds 0.07 (do not weaken the test)").
+  Parts 2-4 (hokkaido, GPU) were NOT started; GPU-hours used: 0.
+  - *Symptom.* Holm family-wise FPR (7 null cleaners, 200 rollouts, base 0.5, 40 000 grids/cell, MC SE in
+    parentheses) exceeds 0.07 in 3 of 24 cells, all K=4: (sigma_sub, sigma_seed) = (0.04, 0.03) 0.097,
+    (0.06, 0.03) 0.087, (0.06, 0.06) 0.095. Every K=8 cell passes (max 0.062).
+  - *Implementation checked.* Scalar (`compare_cleaners_d016`) and vectorized (`subset_test_arrays`) versions agree
+    to 1e-15 (`test_subset_test_vectorized_matches_scalar`), and SE^2 matches the D-016 formula exactly
+    (`test_subset_test_se_formula_balanced`).
+  - *Cause.* With K=4 the between-subset mean square has 3 df, so s_sub^2 is truncated to 0 in ~24% of grids even
+    at true sigma_sub = 0.04. In those grids, SE drops the subset term entirely and df jumps to the pooled
+    within df (~18), so the per-test rejection rate at alpha/7 is 0.019 vs nominal 0.0071. Untruncated grids
+    have df ~2.6 (Satterthwaite with a negative MSW coefficient). Replacing only the truncated-case df with K-1
+    (candidate C) brings FWER at K=4 to <= 0.006.
+  - *Hypotheses / options (protocol decision, not made here).* (1) Keep the D-016 test, require K >= 8 (passes
+    every cell). (2) Candidate C: on truncation, use df = K-1. Passes every cell, but power at K=4 collapses
+    (<= 0.05 for 15pp). (3) Candidate F: always df = K-1. Passes every cell (max 0.068 at (0.06, 0.03, 8,1,3));
+    it has MORE power than the spec at K=8 (Satterthwaite with negative weights gives tiny df). (4) A
+    resampling reference distribution (parametric bootstrap of the null). Not simulated.
+  - *Power is low everywhere for 15pp once sigma_sub >= 0.04* (<= 0.32 under any rule, K=8, R=1). That points to
+    mixture replicates R or larger K, which M0's measured components will size.
+  - *What would resolve it.* Pick a rule (1-4). The FPR assertion then becomes a hard slow test, and
+    `robocurate report` switches its primary test to D-016 (Welch becomes a labeled secondary diagnostic).
+  - Reproduce: `python scripts/d016_null_grid.py --n 40000` (~10 s on the Mac).
+
+| s_sub | s_seed | K,n_p,n_c | FWER spec (MC SE) | FWER C | FWER F | power15 spec | C | F |
+|---|---|---|---|---|---|---|---|---|
+| 0.00 | 0.03 | 4,2,3 | 0.0177 (0.0007) | 0.0000 | 0.0000 | 0.544 | 0.051 | 0.060 |
+| 0.00 | 0.03 | 8,2,3 | 0.0158 (0.0006) | 0.0016 | 0.0021 | 0.658 | 0.600 | 0.767 |
+| 0.00 | 0.03 | 8,1,3 | 0.0103 (0.0005) | 0.0021 | 0.0026 | 0.475 | 0.399 | 0.591 |
+| 0.00 | 0.06 | 4,2,3 | 0.0176 (0.0007) | 0.0000 | 0.0000 | 0.311 | 0.004 | 0.004 |
+| 0.00 | 0.06 | 8,2,3 | 0.0153 (0.0006) | 0.0018 | 0.0023 | 0.351 | 0.196 | 0.269 |
+| 0.00 | 0.06 | 8,1,3 | 0.0097 (0.0005) | 0.0019 | 0.0022 | 0.243 | 0.137 | 0.183 |
+| 0.02 | 0.03 | 4,2,3 | 0.0475 (0.0011) | 0.0000 | 0.0000 | 0.409 | 0.047 | 0.060 |
+| 0.02 | 0.03 | 8,2,3 | 0.0362 (0.0009) | 0.0073 | 0.0103 | 0.476 | 0.432 | 0.610 |
+| 0.02 | 0.03 | 8,1,3 | 0.0269 (0.0008) | 0.0085 | 0.0109 | 0.366 | 0.304 | 0.492 |
+| 0.02 | 0.06 | 4,2,3 | 0.0302 (0.0009) | 0.0000 | 0.0000 | 0.267 | 0.005 | 0.005 |
+| 0.02 | 0.06 | 8,2,3 | 0.0245 (0.0008) | 0.0038 | 0.0050 | 0.280 | 0.165 | 0.240 |
+| 0.02 | 0.06 | 8,1,3 | 0.0169 (0.0006) | 0.0050 | 0.0060 | 0.210 | 0.126 | 0.174 |
+| 0.04 | 0.03 | 4,2,3 | 0.0968 (0.0015) **>0.07** | 0.0010 | 0.0014 | 0.205 | 0.039 | 0.053 |
+| 0.04 | 0.03 | 8,2,3 | 0.0473 (0.0011) | 0.0216 | 0.0374 | 0.224 | 0.210 | 0.324 |
+| 0.04 | 0.03 | 8,1,3 | 0.0624 (0.0012) | 0.0293 | 0.0428 | 0.179 | 0.149 | 0.312 |
+| 0.04 | 0.06 | 4,2,3 | 0.0671 (0.0013) | 0.0001 | 0.0002 | 0.193 | 0.007 | 0.008 |
+| 0.04 | 0.06 | 8,2,3 | 0.0448 (0.0010) | 0.0114 | 0.0178 | 0.167 | 0.112 | 0.182 |
+| 0.04 | 0.06 | 8,1,3 | 0.0394 (0.0010) | 0.0138 | 0.0181 | 0.164 | 0.106 | 0.159 |
+| 0.06 | 0.03 | 4,2,3 | 0.0866 (0.0014) **>0.07** | 0.0060 | 0.0083 | 0.090 | 0.023 | 0.038 |
+| 0.06 | 0.03 | 8,2,3 | 0.0314 (0.0009) | 0.0250 | 0.0483 | 0.109 | 0.106 | 0.157 |
+| 0.06 | 0.03 | 8,1,3 | 0.0522 (0.0011) | 0.0338 | 0.0683 | 0.070 | 0.061 | 0.179 |
+| 0.06 | 0.06 | 4,2,3 | 0.0949 (0.0015) **>0.07** | 0.0008 | 0.0010 | 0.123 | 0.009 | 0.012 |
+| 0.06 | 0.06 | 8,2,3 | 0.0446 (0.0010) | 0.0198 | 0.0364 | 0.088 | 0.069 | 0.122 |
+| 0.06 | 0.06 | 8,1,3 | 0.0620 (0.0012) | 0.0302 | 0.0450 | 0.103 | 0.070 | 0.126 |
+
 
 - B-001 (2026-11-19) RESOLVED by D-015. Welch + Holm failed the null family-wise false-positive test at 3 seeds
   (FWER 0.090 > 0.07; Welch's tail is ~2x too liberal at alpha/7 with 3 runs). The user chose to keep Welch and
@@ -31,6 +83,17 @@
    placeholders. Quality tiers: pause/duplicate/wrong_task -> degraded; jitter/gripper_drop -> bad (future).
 7. Cleaner selection rng is seeded by sha256(task|name|version|budget), so one subset per cleaner is shared
    across train seeds (seeds replicate training, not selection). This is what makes question 1 bite.
+
+## M0 log (branch m0-calibration)
+
+| UTC | Step | Commit | Outcome | GPU-h |
+|---|---|---|---|---|
+| 2026-11-19T05:55Z | Part 0: D-016/017/018, protocol `calibration_seed_start: 300000`, CLAUDE.md rule 10 | `63a9a5a` | committed | 0 |
+| 2026-11-19T05:55Z | Part 1: D-016 variance components, Satterthwaite test, Design/power/MDE, grid script | (this commit) | **blocked, B-002** | 0 |
+
+Part 1 commands: `pytest -q -m "not gpu and not slow"` 144 passed; `-m slow` 8 passed; `-m integration` 3 passed;
+`ruff check .` clean; `python scripts/d016_null_grid.py --n 40000`. `robocurate report` still uses Welch
+(unchanged) until B-002 is resolved. `SEED_FLOOR` / `test: welch_holm` in the protocol are unchanged for the same reason.
 
 ## Phase log
 

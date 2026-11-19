@@ -218,3 +218,107 @@ def test_power_20pp_at_seed_floor():
 def test_mde_zero_sigma_regression():
     """Regression: mde() raised ZeroDivisionError when all placebo runs had identical success rates."""
     assert S.mde(0.0, 3, 3) == 0.0
+
+
+# ------------------------------------------------------------------ D-016 subset-variance test
+
+
+def _balanced(rng, K=4, n_p=2, n_c=3, C=3):
+    return rng.uniform(0.3, 0.7, (C, n_c)), rng.uniform(0.3, 0.7, (K, n_p))
+
+
+def test_variance_components_known_values():
+    # placebo subsets [.5,.7], [.3,.5]: means .6,.4; grand .5; MSB = 2*(.01+.01)/1 = .04
+    # within SS: .02+.02 (placebo) + cleaner [.6,.6,.9] -> .06 ; df = 1+1+2 = 4 -> s_seed2 = .1/4 = .025
+    vc = S.variance_components([[0.5, 0.7], [0.3, 0.5]], [[0.6, 0.6, 0.9]])
+    assert vc.msb == pytest.approx(0.04)
+    assert vc.s_seed2 == pytest.approx(0.025)
+    assert vc.df_w == 4 and vc.df_b == 1 and vc.n0 == pytest.approx(2.0)
+    assert vc.s_sub2_raw == pytest.approx((0.04 - 0.025) / 2)
+    assert not vc.truncated
+
+
+def test_variance_components_truncates_at_zero():
+    vc = S.variance_components([[0.4, 0.6], [0.4, 0.6], [0.5, 0.5]])
+    assert vc.s_sub2_raw < 0 and vc.s_sub2 == 0.0 and vc.truncated
+
+
+def test_subset_test_se_formula_balanced():
+    """SE^2 = s_sub^2 (1 + 1/K) + s_seed^2 (1/n_c + 1/(K n_p)) (D-016)."""
+    rng = np.random.default_rng(4)
+    for _ in range(20):
+        cl, pl = _balanced(rng)
+        out, vc = S.compare_cleaners_d016({f"c{i}": cl[i] for i in range(len(cl))}, list(pl), n_boot=10)
+        K, n_p = pl.shape
+        se2 = vc.s_sub2 * (1 + 1 / K) + vc.s_seed2 * (1 / cl.shape[1] + 1 / (K * n_p))
+        for o in out:
+            assert o.se**2 == pytest.approx(se2)
+            assert o.diff == pytest.approx(o.cleaner_mean - pl.mean())
+
+
+def test_subset_test_vectorized_matches_scalar():
+    rng = np.random.default_rng(7)
+    cl, pl = rng.uniform(0.3, 0.7, (50, 5, 3)), rng.uniform(0.3, 0.7, (50, 4, 2))
+    _, t, df, p, _, _ = S.subset_test_arrays(cl, pl)
+    for i in range(50):
+        out, _ = S.compare_cleaners_d016({f"c{j}": cl[i, j] for j in range(5)}, list(pl[i]), n_boot=10)
+        for j, o in enumerate(out):
+            assert o.p_raw == pytest.approx(p[i, j], abs=1e-12)
+            assert o.df == pytest.approx(df[i, j])
+
+
+def test_subset_test_unbalanced_and_full_reference():
+    vc = S.variance_components([[0.5, 0.7, 0.6], [0.3, 0.5], [0.45]], [[0.6, 0.62]])
+    assert vc.inv_n_sum == pytest.approx(1 / 3 + 1 / 2 + 1)
+    with_own = S.subset_test([0.6, 0.62], vc, 0.5)
+    without = S.subset_test([0.6, 0.62], vc, 0.5, own_subset_var=False)
+    assert without.se < with_own.se
+
+
+def test_subset_test_needs_two_subsets_and_replicates():
+    with pytest.raises(ValueError):
+        S.variance_components([[0.5, 0.6]])
+    with pytest.raises(ValueError):
+        S.variance_components([[0.5], [0.6]])
+
+
+def test_subset_power_and_mde_consistent():
+    d = S.Design(n_c=3, K=8, n_p=2)
+    m = S.subset_mde(0.03, 0.05, d)
+    assert S.subset_power(m, 0.03, 0.05, d) == pytest.approx(0.80, abs=1e-4)
+    # more random subsets shrink the MDE; more cleaner seeds cannot remove the sigma_sub term
+    assert S.subset_mde(0.03, 0.05, S.Design(3, 12, 2)) < m
+    big_nc = S.Design(n_c=1000, K=8, n_p=2)
+    assert S.design_se(0.03, 0.05, big_nc)[0] > 0.03
+    assert S.subset_mde(0.03, 0.05, S.Design(3, 8, 2, R=3)) < m
+
+
+def test_design_runs():
+    assert S.Design(n_c=3, K=8, n_p=2, R=2, n_cleaners=7, n_full=3).runs() == 2 * (21 + 16 + 3)
+
+
+@pytest.mark.slow
+def test_d016_null_grid_runs_and_reports():
+    """Part 1 grid (informational while B-002 is open): asserts only that it runs and is well formed.
+
+    The as-specified D-016 test exceeds FWER 0.07 at K=4 (see PROGRESS.md B-002); the pass condition will be
+    asserted once the protocol owner picks the fix.
+    """
+    import importlib.util
+
+    from robocurate.paths import repo_root
+
+    spec = importlib.util.spec_from_file_location("g", repo_root() / "scripts/d016_null_grid.py")
+    g = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(g)
+    rows = g.grid(4000)
+    assert len(rows) == 24
+    for r in rows:
+        assert 0 <= r["fwer"]["spec"] <= 1 and 0 <= r["power15"]["spec"] <= 1
+
+
+def test_power_large_noncentrality_regression():
+    """Regression: scipy nct.cdf returned NaN deep in the tail, so subset_mde's root finder crashed (R=3)."""
+    d = S.Design(n_c=3, K=8, n_p=2, R=3)
+    assert S.subset_power(0.2, 0.03, 0.05, d) == pytest.approx(1.0, abs=1e-3)
+    assert 0 < S.subset_mde(0.03, 0.05, d) < 0.2
