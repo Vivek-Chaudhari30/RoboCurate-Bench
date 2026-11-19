@@ -195,7 +195,7 @@ def _mock_local_backend(monkeypatch, tmp_path, kind):
     task = types.SimpleNamespace(env_type="aloha", env_task="AlohaTransferCube-v0", path=tmp_path / "t.yaml",
                                  sha256="1" * 64, raw=lambda k: {"eval_batch_size": 50, "num_workers": None}[k])
     grid_vals = {"intermediate_save_freq": 500, "n_final_rollouts": 200, "n_intermediate_rollouts": 50,
-                 "num_workers": 8}
+                 "num_workers": 8, "batch_size": None, "eval_batch_size": None}
     grid = types.SimpleNamespace(path=tmp_path / "g.yaml", sha256="2" * 64, raw=lambda k: grid_vals[k])
     plan = types.SimpleNamespace(protocol=protocol, task=task, grid=grid, kind=kind, subset_seed=lambda spec: None)
     be = L.LocalBackend.__new__(L.LocalBackend)

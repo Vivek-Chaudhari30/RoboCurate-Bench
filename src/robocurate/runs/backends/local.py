@@ -158,6 +158,17 @@ class LocalBackend:
                 return int(v)
         return None
 
+    def _cal_value(self, name: str) -> int | None:
+        """A measured value from the calibration config (stage d of the launch kit), else None."""
+        if self.plan.kind != "calibration":
+            return None
+        v = self.plan.grid.raw(name) if hasattr(self.plan.grid, "raw") else None
+        return None if v is None or is_tbd(v) else int(v)
+
+    def eval_batch_size(self) -> int:
+        v = self._cal_value("eval_batch_size")
+        return v if v is not None else int(self.plan.task.raw("eval_batch_size"))
+
     def n_final_rollouts(self) -> int:
         if self.plan.kind == "calibration":
             return int(self.plan.grid.raw("n_final_rollouts"))
@@ -197,12 +208,12 @@ class LocalBackend:
         train_cmd = build_train_cmd(self.plan.task, spec, sub, run_dir / "train", save_freq=save_freq,
                                     steps=self.steps, device=self.device,
                                     sample_weighting_progress=self.progress_parquet(spec),
-                                    num_workers=self.num_workers())
+                                    num_workers=self.num_workers(), batch_size=self._cal_value("batch_size"))
         peak_train = self._run(train_cmd, run_dir / "train.log")
         ckpt = final_checkpoint(run_dir / "train", self.steps)
         n = self.n_final_rollouts()
         seed0 = self.eval_seed_start()
-        eval_cmd = build_eval_cmd(ckpt, n, seed0, int(self.plan.task.raw("eval_batch_size")),
+        eval_cmd = build_eval_cmd(ckpt, n, seed0, self.eval_batch_size(),
                                   env_type=self.plan.task.env_type, env_task=self.plan.task.env_task,
                                   output_dir=run_dir / "eval", device=self.device)
         peak_eval = self._run(eval_cmd, run_dir / "eval.log")
@@ -213,7 +224,7 @@ class LocalBackend:
             for step in range(save_freq, self.steps, save_freq):
                 ck = checkpoint_dir(run_dir / "train", step, self.steps)
                 out = run_dir / f"eval_step{step}"
-                bs = min(n_mid, int(self.plan.task.raw("eval_batch_size")))
+                bs = min(n_mid, self.eval_batch_size())
                 cmd = build_eval_cmd(ck, n_mid, seed0, bs,
                                      env_type=self.plan.task.env_type, env_task=self.plan.task.env_task,
                                      output_dir=out, device=self.device)

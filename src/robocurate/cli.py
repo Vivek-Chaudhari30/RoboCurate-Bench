@@ -72,7 +72,8 @@ def cmd_prepare(args) -> int:
     else:
         raise ConfigError("prepare --backend local needs the mixture dataset, Robometer weights and (for "
                           "reference-policy entrants) the M0 full-data checkpoint; not available in this milestone")
-    recs = P.prepare_plan(plan, view, out, args.backend, factory, replicate=args.replicate)
+    only = set(args.only.split(",")) if args.only else None
+    recs = P.prepare_plan(plan, view, out, args.backend, factory, replicate=args.replicate, only=only)
     for r in recs:
         c = r["cleaner"]
         what = (f"{len(r['selected_episodes'])} episodes" if "selected_episodes" in r
@@ -264,6 +265,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("config")
     p.add_argument("--backend", choices=["fake", "local"], required=True)
     p.add_argument("--selections-dir", help="default: $ROBOCURATE_SCRATCH/selections/<grid>-<backend>")
+    p.add_argument("--only", help="comma-separated entrant names to prepare (default: every entrant in the grid)")
     p.add_argument("--replicate", type=int, default=0, help="mixture replicate index")
     p.set_defaults(fn=cmd_prepare)
 

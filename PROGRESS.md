@@ -40,6 +40,7 @@ Start 2026-11-19T16:32Z (`caffeinate -dims -t 43200`). Env: rcb (py3.12, lerobot
 | 2026-11-19T16:55Z | 4 (bug fix) | runs/backends/local.py: calibration runs evaluated on protocol EVAL seeds (eval_seed_start) — violates D-017 / CLAUDE.md rule 10; never executed (M0 not launched). Now eval_seed_start() returns calibration_seed_start for calibration plans (final and intermediate evals), n_final_rollouts from the calibration config, seeds record has seed_block. Regression test test_local_backend_eval_seed_block (mocked run()) | default 231 passed + 1 xfailed; ruff clean | fixed |
 | 2026-11-19T18:39Z | 4 Task B | D-030 checks PASS on CPU (scratch venv with lerobot's pusht extra + diffusers; rcb + lock untouched); configs task/mixture/grid/M0 for pusht_diffusion; calibration random_subsets + per-unit seeds (Task A M0 config gained K=4x2); num_workers plumbing (D-027); tests/test_task_b.py | test_task_b 6 passed + 1 skipped (rcb), env test passes in venv; default (non-integration) green; ruff clean | done; Task B = PushT + Diffusion |
 | 2026-11-19T18:39Z | 5 Task A mixture | configs/mixtures/task_a_v1.yaml per D-031 (rates from docs/defect_validation.md); recipe rate + deferred_sources schema; no scripted transfer-cube policy installed -> replay-mode generation path implemented + toybed-tested, real generation deferred; jitter sigma [0.173, 0.726] and grasp onset 135 measured from scripted actions | tests/test_mixture_v1.py 9 passed | done (CPU build + validate-defects pending: HF Hub TLS failure, see below) |
+| 2026-11-19T18:47Z | 6 launch kit | m0_pipeline.sh + launch/m0.py (stages a-f), gpu_phase_rollouts.sh + launch/rollouts.py, prepare_gpu_scores.sh (+ prepare --only), tests/test_gpu.py (gpu marker), task_a_v1 grid, runbook_gpu.md; calibration batch/eval-batch/num_workers fields | test_launch 13 passed; non-integration suite 253 passed + 1 skipped + 1 xfailed; ruff clean | dry run PASS both tasks (fake, temp scratch, no commits); output in the Launch kit section; nothing launched |
 <!-- ng-log -->
 
 ## Previous status (B-003/M0-launch task, STOPPED at Step 1, B-004; superseded by D-026)
@@ -371,6 +372,169 @@ d = 4000, lambda = 0, m = 100).
   (tests `test_disabled_entrant_refused_in_grids_and_excluded_from_report`). It is not listed under CUPID's name.
 - *Next step if wanted.* (b): a toy diffusion policy (DDPM loss, the reference "square" output, Q = 1) on the
   toybed, then require the sanity pass there.
+
+## Launch kit (overnight 2, item 6) — built and dry-run on CPU; NOT launched, no ssh
+
+Files:
+- `scripts/m0_pipeline.sh` (bash guard: env.sh sourced, D-027 scratch, tmux, CUDA_VISIBLE_DEVICES, clean tree; then
+  `python -m robocurate.launch.m0`) and `src/robocurate/launch/m0.py`, stages a-f as specified.
+- `scripts/gpu_phase_rollouts.sh` -> `robocurate.launch.rollouts`.
+- `scripts/prepare_gpu_scores.sh` -> `robocurate prepare --only <GPU entrants>` (new `--only` flag).
+- `tests/test_gpu.py` (marker gpu: seed determinism, eval batch invariance; run by stage c only).
+- `configs/grids/task_a_v1.yaml` (K = 8, every enabled entrant, RA-BC with 8 permutations).
+- `configs/fake/m0_dryrun.yaml`.
+- `docs/runbook_gpu.md`.
+
+Sources:
+- LeRobot defaults read from `TrainPipelineConfig`: steps 100,000 (configs/train.py:111), batch 8 (:102),
+  num_workers 4 (:101).
+- Train-log metrics `updt_s` / `data_s`: scripts/lerobot_train.py:568-569, rendered by utils/logging_utils.py:63-65.
+- `cudnn_deterministic` exists (configs/train.py:99, lerobot_train.py:287-291), but is not set (no per-method
+  change).
+
+Supporting changes:
+- Calibration configs gain `batch_size`, `eval_batch_size` and `num_workers` (written by stage d).
+- The local backend prefers them for calibration plans.
+
+Tests: `tests/test_launch.py`, 13 passed. They cover:
+- startup refusals, including env.sh sourced after the lerobot import;
+- the 72 h give-up (432 polls of 10 min);
+- b2 doubles only num_workers, at most twice;
+- eval-batch choice under 12 GB;
+- the S cap, and the exit below 25%;
+- the YAML write-back keeps comments and validates;
+- cleanup keeps the final checkpoint and the rollout checkpoints;
+- stage e: fail twice -> skip, 3 skipped -> stop, the GPU-h cap, the disk guard, the 72 h run cap;
+- the power table and proposal;
+- the full dry run via the shell script (HEAD unchanged, the real-run guard refuses).
+
+Dry-run outputs:
+- `--task a`: stages a-f pass, as in the log below.
+- `--task b`: stages a-f pass, done = 11.
+- Resume: 0 runs to do, 11 already done.
+- Real-run guard: refuses (D-027).
+- Rollouts (fake): scripted_replay 10 episodes, seeds 599990-599999; policy_rollouts 100 episodes, seeds
+  599890-599989; disjoint, offset 10.
+- Rollouts (local): refuses with the list of missing pieces.
+- prepare_gpu_scores (fake): rabc, robometer_filter and rcb_score prepared.
+
+```text
+2026-11-19T18:44:43Z start task a backend fake cal $TMP/state_a/m0_act_transfer_cube_human.yaml state $TMP/state_a
+2026-11-19T18:44:43Z disk: {'scratch': '$TMP/scratch', 'free_gb': 219.757555712, 'used_by_us_gb': 0.0, 'cap_gb': 200.0, 'quota': ''}
+2026-11-19T18:44:43Z [a] GPU busy (fake: pid 4242 (otheruser) uses 27556 MB > 2048 MB); next poll in 10 min
+2026-11-19T18:44:43Z [a] GPU busy (fake: pid 4242 (otheruser) uses 27556 MB > 2048 MB); next poll in 10 min
+2026-11-19T18:44:43Z [a] GPU free after 0.33 h
+2026-11-19T18:44:43Z [b] smoke: {'step_s': 0.2, 'data_frac': 0.45, 'gpu_util': 35.0, 'peak_mem_gb': 9.5, 'eval_s': 40.0, 'num_workers': 4, 'checkpoint': 'fake://smoke'}
+2026-11-19T18:44:43Z [b2] I/O-bound (util 35% < 50%, data 45% > 30%); retry with num_workers=8
+2026-11-19T18:44:43Z [b2] smoke: {'step_s': 0.12, 'data_frac': 0.08, 'gpu_util': 82.0, 'peak_mem_gb': 9.5, 'eval_s': 40.0, 'num_workers': 8, 'checkpoint': 'fake://smoke'}
+2026-11-19T18:44:43Z [c] GPU determinism / batch-invariance tests: PASS: fake: GPU tests not run (no GPU in the dry run)
+2026-11-19T18:44:43Z [d] eval timings (50 eps): {5: (300.0, 3.0), 10: (170.0, 5.0), 25: (95.0, 9.0), 50: (80.0, 14.0)}; eval batch 25; steps {'default': 100000, 'cap': 64708, 'S': 64700, 'capped': True, 'frac': 0.647, 'per_run_h': 2.499722222222222}; wrote {'steps': 64700, 'intermediate_save_freq': 6470, 'eval_batch_size': 25, 'batch_size': 8, 'num_workers': 8} -> $TMP/state_a/m0_act_transfer_cube_human.yaml
+2026-11-19T18:44:44Z [e] 11 runs to do (0 already done)
+2026-11-19T18:44:44Z [a] GPU free after 0.00 h
+2026-11-19T18:44:44Z [done]    8477debc9a90bc89  full b=1.0 seed=1000
+2026-11-19T18:44:44Z [e] (dry run, not executed) git -C /Users/vivek/Developer/CODES/RoboCurate-Bench add $TMP/state_a/results/8477debc9a90bc89.json $TMP/state_a/PROGRESS_dryrun.md ; git -C /Users/viv ...
+2026-11-19T18:44:44Z [e] packing enabled: solo full-data run used 38% GPU, 6.0 GB
+2026-11-19T18:44:44Z [a] GPU free after 0.00 h
+2026-11-19T18:44:44Z [done]    fea60cfb44a17d89  full b=1.0 seed=1002
+2026-11-19T18:44:44Z [done]    26b69c73d1b61c64  full b=1.0 seed=1001
+2026-11-19T18:44:44Z [e] (dry run, not executed) git -C /Users/vivek/Developer/CODES/RoboCurate-Bench add $TMP/state_a/results/26b69c73d1b61c64.json $TMP/state_a/PROGRESS_dryrun.md ; git -C /Users/viv ...
+2026-11-19T18:44:44Z [e] (dry run, not executed) git -C /Users/vivek/Developer/CODES/RoboCurate-Bench add $TMP/state_a/results/fea60cfb44a17d89.json $TMP/state_a/PROGRESS_dryrun.md ; git -C /Users/viv ...
+2026-11-19T18:44:44Z [a] GPU free after 0.00 h
+2026-11-19T18:44:44Z [done]    e6012b9e0289262c  random b=0.5 seed=1000
+2026-11-19T18:44:44Z [done]    fd4392ae2fd204ab  random b=0.5 seed=1000
+2026-11-19T18:44:44Z [e] (dry run, not executed) git -C /Users/vivek/Developer/CODES/RoboCurate-Bench add $TMP/state_a/results/e6012b9e0289262c.json $TMP/state_a/PROGRESS_dryrun.md ; git -C /Users/viv ...
+2026-11-19T18:44:44Z [e] (dry run, not executed) git -C /Users/vivek/Developer/CODES/RoboCurate-Bench add $TMP/state_a/results/fd4392ae2fd204ab.json $TMP/state_a/PROGRESS_dryrun.md ; git -C /Users/viv ...
+2026-11-19T18:44:44Z [a] GPU free after 0.00 h
+2026-11-19T18:44:44Z [done]    ee9647313527e7fc  random b=0.5 seed=1000
+2026-11-19T18:44:44Z [done]    c3cb13b83535cbc7  random b=0.5 seed=1000
+2026-11-19T18:44:44Z [e] (dry run, not executed) git -C /Users/vivek/Developer/CODES/RoboCurate-Bench add $TMP/state_a/results/c3cb13b83535cbc7.json $TMP/state_a/PROGRESS_dryrun.md ; git -C /Users/viv ...
+2026-11-19T18:44:44Z [e] (dry run, not executed) git -C /Users/vivek/Developer/CODES/RoboCurate-Bench add $TMP/state_a/results/ee9647313527e7fc.json $TMP/state_a/PROGRESS_dryrun.md ; git -C /Users/viv ...
+2026-11-19T18:44:44Z [a] GPU free after 0.00 h
+2026-11-19T18:44:44Z [done]    88a3641885d6824f  random b=0.5 seed=1001
+2026-11-19T18:44:44Z [done]    77710a3deb345cf2  random b=0.5 seed=1001
+2026-11-19T18:44:44Z [e] (dry run, not executed) git -C /Users/vivek/Developer/CODES/RoboCurate-Bench add $TMP/state_a/results/77710a3deb345cf2.json $TMP/state_a/PROGRESS_dryrun.md ; git -C /Users/viv ...
+2026-11-19T18:44:44Z [e] (dry run, not executed) git -C /Users/vivek/Developer/CODES/RoboCurate-Bench add $TMP/state_a/results/88a3641885d6824f.json $TMP/state_a/PROGRESS_dryrun.md ; git -C /Users/viv ...
+2026-11-19T18:44:44Z [a] GPU free after 0.00 h
+2026-11-19T18:44:44Z [done]    440ef7136b164f37  random b=0.5 seed=1001
+2026-11-19T18:44:44Z [done]    8c2105eb402e0214  random b=0.5 seed=1001
+2026-11-19T18:44:44Z [e] (dry run, not executed) git -C /Users/vivek/Developer/CODES/RoboCurate-Bench add $TMP/state_a/results/8c2105eb402e0214.json $TMP/state_a/PROGRESS_dryrun.md ; git -C /Users/viv ...
+2026-11-19T18:44:44Z [e] (dry run, not executed) git -C /Users/vivek/Developer/CODES/RoboCurate-Bench add $TMP/state_a/results/440ef7136b164f37.json $TMP/state_a/PROGRESS_dryrun.md ; git -C /Users/viv ...
+...
+== resume Task A (stages e,f)
+2026-11-19T18:45:13Z [e] 0 runs to do (11 already done)
+2026-11-19T18:45:13Z [e] done=0 skipped=0 GPU-h=0.00 stop=None
+2026-11-19T18:45:13Z [f] analysis written to $TMP/state_a/m0_summary.md
+== Task B full dry run
+2026-11-19T18:45:13Z [a] GPU free after 0.33 h
+2026-11-19T18:45:14Z [b2] I/O-bound (util 35% < 50%, data 45% > 30%); retry with num_workers=8
+2026-11-19T18:45:14Z [b2] smoke: {'step_s': 0.12, 'data_frac': 0.08, 'gpu_util': 82.0, 'peak_mem_gb': 9.5, 'eval_s': 40.0, 'num_workers': 8, 'checkpoint': 'fake://smoke'}
+2026-11-19T18:45:14Z [c] GPU determinism / batch-invariance tests: PASS: fake: GPU tests not run (no GPU in the dry run)
+2026-11-19T18:45:14Z [d] eval timings (50 eps): {5: (300.0, 3.0), 10: (170.0, 5.0), 25: (95.0, 9.0), 50: (80.0, 14.0)}; eval batch 25; steps {'default': 100000, 'cap': 64708, 'S': 64700, 'capped': True, 'frac': 0.647, 'per_run_h': 2.499722222222222}; wrote {'s
+2026-11-19T18:45:14Z [e] 11 runs to do (0 already done)
+2026-11-19T18:45:14Z [a] GPU free after 0.00 h
+2026-11-19T18:45:14Z [e] packing enabled: solo full-data run used 38% GPU, 6.0 GB
+2026-11-19T18:45:14Z [a] GPU free after 0.00 h
+2026-11-19T18:45:14Z [a] GPU free after 0.00 h
+2026-11-19T18:45:14Z [a] GPU free after 0.00 h
+2026-11-19T18:45:14Z [a] GPU free after 0.00 h
+2026-11-19T18:45:14Z [a] GPU free after 0.00 h
+2026-11-19T18:45:14Z [e] done=11 skipped=0 GPU-h=0.00 stop=None
+2026-11-19T18:45:14Z [f] analysis written to $TMP/state_b/m0_summary.md
+2026-11-19T18:45:14Z finished
+== real-run guard
+m0_pipeline: ROBOCURATE_SCRATCH must be /share/datasets/robocurate (D-027), got $TMP/scratch
+== rollouts (fake)
+scripted_replay 10 [599990, 599999] 1.0 0
+policy_rollouts 100 [599890, 599989] 0.74 10
+== rollouts (local refuses)
+gpu_phase_rollouts: local backend not built yet. Missing: LeRobot checkpoint -> obs/action adapter recording camera frames (rollout writer stores state and action only; ACT/Diffusion mixtures need images); a scripted transfer-cube policy (none in gym-aloha 0.1.5 or lerobot 0.6.1)
+== prepare_gpu_scores (fake)
+rabc v1 [weighting] budget 1.0: progress + 8 D-028 placebo progress parquets; computed in 0.02s, GPU-h 0.000, rollouts 0, key cc2aad47c17a
+robometer_filter v1 [selection] budget 0.5: 25 episodes; computed in 0.00s, GPU-h 0.000, rollouts 0, key 8f3db9f4b352
+rcb_score v1 [selection] budget 0.5: 25 episodes; computed in 0.00s, GPU-h 0.000, rollouts 0, key 07ef0d428b25
+selections -> $TMP/sel
+
+```
+
+Stage f output of the Task A dry run (FAKE numbers; every GPU-h is 0 because the fake backend takes no time):
+
+### M0 morning summary: task a (m0_act_transfer_cube_human)
+
+- dry run (fake): True
+- num_workers: None
+- autoconf: {'S': None, 'per_run_h': None}
+- grid: done 0, skipped 0, GPU-h 0.00, stop: completed
+- s_seed 0.058 (95% CI 0.037-0.127), s_sub 0.000 (truncated) (approx. 95% CI 0.000-0.124)
+
+| n | K | R | runs | MDE (80%) | power at 15 pp | GPU-h |
+|---|---|---|---|---|---|---|
+| 3 | 8 | 1 | 84 | 0.178 | 0.62 | 0.0 |
+| 3 | 8 | 2 | 168 | 0.105 | 0.99 | 0.0 |
+| 3 | 8 | 3 | 252 | 0.081 | 1.00 | 0.0 |
+| 3 | 12 | 1 | 108 | 0.153 | 0.78 | 0.0 |
+| 3 | 12 | 2 | 216 | 0.097 | 1.00 | 0.0 |
+| 3 | 12 | 3 | 324 | 0.077 | 1.00 | 0.0 |
+| 5 | 8 | 1 | 140 | 0.138 | 0.87 | 0.0 |
+| 5 | 8 | 2 | 280 | 0.081 | 1.00 | 0.0 |
+| 5 | 8 | 3 | 420 | 0.063 | 1.00 | 0.0 |
+| 5 | 12 | 1 | 180 | 0.118 | 0.96 | 0.0 |
+| 5 | 12 | 2 | 360 | 0.075 | 1.00 | 0.0 |
+| 5 | 12 | 3 | 540 | 0.060 | 1.00 | 0.0 |
+
+Proposed (not adopted): n=3 K=8 R=2, MDE 0.105, 0.0 GPU-h, meets 12 pp: True.
+- step curve (full data, mean over seeds): {}
+- cost: {'per_run_h_mean': 1.8469613007824832e-07, 'per_run_h_max': 2.586841583251953e-07, 'total_run_h': 2.0316574308607315e-06, 'peak_gpu_mem_mb_max': 0}; disk 0.00 GB
+
+Gaps found while building the kit (GPU-phase prerequisites, not built):
+1. `robocurate prepare --backend local`, which needs the mixture, the Robometer weights and the reference checkpoint.
+2. A LeRobot checkpoint -> obs/action adapter that records camera frames, for the policy-rollout source.
+3. A scripted transfer-cube policy.
+4. lerobot[pusht] and diffusers in the lock (Task B).
+
+Conflicts that need decisions:
+- D-027 ("only final checkpoints kept") vs D-031 (rollouts from 10/30/60% checkpoints). The kit keeps those three
+  checkpoints of the seed-1000 full-data run only.
+- Diffusion inference is stochastic, so stage c's batch-invariance test may fail for Task B.
 
 ## Task B setup (overnight 2, item 4, D-030) — all three checks PASS: Task B = PushT + Diffusion Policy
 

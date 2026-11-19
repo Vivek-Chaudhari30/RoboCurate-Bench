@@ -68,6 +68,7 @@ def build_train_cmd(
     device: str = "cuda",
     sample_weighting_progress: str | Path | None = None,
     num_workers: int | None = None,
+    batch_size: int | None = None,
 ) -> list[str]:
     """`steps` overrides task.steps (calibration configs carry their own); `save_freq` defaults to steps.
 
@@ -76,7 +77,7 @@ def build_train_cmd(
     if weighting != (sample_weighting_progress is not None):
         raise ConfigError("sample weighting is set iff the condition is weighting-track (D-020)")
     steps = int(_num(task_cfg, "steps")) if steps is None else int(steps)
-    batch_size = int(_num(task_cfg, "batch_size"))
+    batch_size = int(_num(task_cfg, "batch_size")) if batch_size is None else int(batch_size)
     if save_freq is None:
         cfg_sf = task_cfg.raw("save_freq")
         save_freq = steps if cfg_sf is None or is_tbd(cfg_sf) else int(cfg_sf)

@@ -249,11 +249,18 @@ def prepare_cell(cell: Cell, cleaner: Cleaner, view: DatasetView, protocol: Any,
 
 
 def prepare_plan(plan: Any, view: DatasetView, cache_dir: str | Path, backend: str,
-                 context_factory: Callable[[Cleaner], CurationContext], replicate: int = 0) -> list[dict[str, Any]]:
+                 context_factory: Callable[[Cleaner], CurationContext], replicate: int = 0,
+                 only: set[str] | None = None) -> list[dict[str, Any]]:
+    """only: restrict to these entrant names (e.g. the GPU entrants whose scores are cached first)."""
     from robocurate.curation.weights import policy_chunk_size
 
     out = []
     cells = cells_for_plan(plan, replicate)
+    if only is not None:
+        unknown = only - {c.name for c in cells}
+        if unknown:
+            raise PrepareError(f"--only names not in the grid: {sorted(unknown)}")
+        cells = [c for c in cells if c.name in only]
     chunk = policy_chunk_size(plan.task.policy_type) if any(c.kind == "weighting" for c in cells) else None
     for cell in cells:
         cleaner = registry.get(cell.name, cell.version)

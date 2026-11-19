@@ -360,6 +360,8 @@ class CalibrationConfig(_Guarded):
     intermediate_save_freq: Any
     random_subsets: dict | None = None  # {budget, n_subsets, train_seeds}: K-subset cells for s_sub (M0 design)
     num_workers: Any = None  # D-027: DataLoader workers (speed only); set by the launch kit's I/O check
+    batch_size: Any = None  # calibration training batch (D-017: LeRobot default); None -> task.batch_size
+    eval_batch_size: Any = None  # chosen by the launch kit (stage d); None -> task.eval_batch_size
 
     def __post_init__(self) -> None:
         if object.__getattribute__(self, "n_final_rollouts") < 200:

@@ -1,0 +1,9 @@
+# FAKE backend parameters for the launch-kit dry run (scripts/m0_pipeline.sh --dry-run). NOT a protocol config.
+# Calibration plans keep their own train seeds; this file only sets the synthetic success model.
+base: 0.55
+sigma_seed: 0.05
+train_seeds: [1000, 1001, 1002]
+effects:
+  full: 0.0
+  random: -0.03
+sleep_s: 0

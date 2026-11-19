@@ -1,0 +1,21 @@
+# Launch grid for Task A (D-006 budget 0.5; D-026: K = 8 random subsets, n = protocol train_seeds, TBD from M0).
+# Mixture: configs/mixtures/task_a_v1.yaml (D-031). CUPID: disabled (D-029). Supersedes task_a_v0 (K = 3 draft).
+name: task_a_v1
+task: configs/tasks/aloha_transfer_cube.yaml
+protocol: configs/protocol.yaml
+budgets: [0.5]
+conditions:
+  - {kind: full}
+  - {kind: random, n_subsets: 8}
+  - {kind: oracle}                                    # reference condition, not an entrant (D-012)
+  - {kind: cleaner, name: length_heuristic, version: "1"}   # built-in baseline
+  - {kind: cleaner, name: lerobot_doctor, version: "1"}
+  - {kind: cleaner, name: kinema, version: "1"}
+  - {kind: cleaner, name: roboaudit, version: "1"}
+  - {kind: cleaner, name: rda, version: "1"}
+  - {kind: cleaner, name: robometer_filter, version: "1"}
+  - {kind: cleaner, name: rcb_score, version: "1"}
+  - {kind: cleaner, name: demo_score, version: "1"}
+  - {kind: cleaner, name: deminf, version: "1"}
+  # Weighting track (D-020, D-028): RA-BC vs 8 progress-curve permutations, full data; unweighted full = reference.
+  - {kind: weighting, name: rabc, version: "1", n_permutations: 8}
