@@ -55,9 +55,11 @@ def build_train_cmd(
     out_dir: str | Path,
     *,
     save_freq: int | None = None,
+    steps: int | None = None,
     device: str = "cuda",
 ) -> list[str]:
-    steps = int(_num(task_cfg, "steps"))
+    """`steps` overrides task.steps (calibration configs carry their own); `save_freq` defaults to steps."""
+    steps = int(_num(task_cfg, "steps")) if steps is None else int(steps)
     batch_size = int(_num(task_cfg, "batch_size"))
     if save_freq is None:
         cfg_sf = task_cfg.raw("save_freq")

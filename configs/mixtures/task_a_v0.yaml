@@ -1,0 +1,15 @@
+# DRAFT: proportions and defect counts below are PLACEHOLDERS, not protocol decisions.
+# Mixed-quality training set for Task A. Post-hoc defects are limited to pause/duplicate/wrong_task (D-011);
+# jitter / failed grasps come later from replay-mode sim rollouts (not in this recipe).
+name: task_a_v0
+repo_id: robocurate/task_a_v0
+seed: 0
+sources:
+  - {dataset: lerobot/aloha_sim_transfer_cube_scripted, source: scripted, n_episodes: 25}
+  - {dataset: lerobot/aloha_sim_transfer_cube_human, source: human, n_episodes: 25}
+wrong_task_strings:
+  - "Insert the peg into the socket."
+defects:
+  pause: {n_episodes: 6, k_min: 25, k_max: 75}
+  duplicate: {n_episodes: 4}
+  wrong_task: {n_episodes: 4}

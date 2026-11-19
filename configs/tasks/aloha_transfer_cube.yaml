@@ -1,0 +1,14 @@
+# Task A (D-009): ALOHA sim transfer-cube + ACT.
+name: aloha_transfer_cube
+env_type: aloha                       # lerobot envs/configs.py:147 (AlohaEnv)
+env_task: AlohaTransferCube-v0        # gym id gym_aloha/AlohaTransferCube-v0
+policy_type: act                      # policies/act/configuration_act.py:22
+source_datasets:                      # both verified on the Hub (v3.0 tag) and loadable with lerobot 0.6.1
+  - lerobot/aloha_sim_transfer_cube_human
+  - lerobot/aloha_sim_transfer_cube_scripted
+train_dataset: robocurate/task_a_v0   # built by configs/mixtures/task_a_v0.yaml (local only, never pushed)
+steps: TBD                            # fixed gradient steps for every condition (D-004); from M0
+per_run_gpu_h: TBD                    # train + eval, measured in M0
+batch_size: TBD                       # training hyperparameter; LeRobot default is 8 (configs/train.py:102). Decide at M0.
+eval_batch_size: TBD                  # parallel envs in lerobot-eval; does not change env seeds (see eval/lerobot_eval.py)
+save_freq: null                       # null -> only the final checkpoint is saved for result runs

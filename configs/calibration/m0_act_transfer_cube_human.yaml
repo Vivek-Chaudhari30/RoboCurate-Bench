@@ -1,0 +1,11 @@
+# M0 calibration: ACT on the human transfer-cube demos, full data. Measures seed-to-seed sigma (for the
+# D-005 power analysis), per-run GPU-h, and where success plateaus (to choose `steps`).
+name: m0_act_transfer_cube_human
+task: configs/tasks/aloha_transfer_cube.yaml
+protocol: configs/protocol.yaml
+dataset: lerobot/aloha_sim_transfer_cube_human
+train_seeds: [1000, 1001, 1002]
+steps: TBD
+n_final_rollouts: 200
+n_intermediate_rollouts: 50
+intermediate_save_freq: TBD

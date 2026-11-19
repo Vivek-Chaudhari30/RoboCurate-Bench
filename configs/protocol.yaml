@@ -1,0 +1,12 @@
+# RoboCurate-Bench protocol. This file FREEZES at eval-v1 (when src/robocurate/eval/FROZEN is created).
+# After that it must never be edited. Values marked TBD depend on GPU calibration (M0) and block result
+# runs until measured (D-014). Seed floor per condition: 6 (D-015).
+eval_seed_start: 100000        # lerobot-eval --seed; episode i uses env seed eval_seed_start + i
+n_eval_rollouts: 200           # per evaluated checkpoint (CLAUDE.md rule 2)
+checkpoint_rule: final         # final checkpoint at the fixed step count only (D-003)
+n_train_seeds: TBD             # set by power analysis on M0-measured sigma (D-005), floor 6 (D-015)
+train_seeds: TBD
+random_subset_seeds: [2000, 2001, 2002]   # placebo subsets (CLAUDE.md rule 1)
+curation_seed_range: [500000, 599999]     # env seeds for cleaners that roll out policies; disjoint from eval (D-007)
+alpha: 0.05
+test: welch_holm               # D-002

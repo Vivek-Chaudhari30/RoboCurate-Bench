@@ -1,0 +1,10 @@
+# Launch grid for Task A (D-006: keep 50% of episodes).
+name: task_a_v0
+task: configs/tasks/aloha_transfer_cube.yaml
+protocol: configs/protocol.yaml
+budgets: [0.5]
+conditions:
+  - {kind: full}
+  - {kind: random, n_subsets: 3}
+  - {kind: cleaner, name: length_heuristic, version: "1"}
+  - {kind: oracle}                       # reference condition, not an entrant (D-012)

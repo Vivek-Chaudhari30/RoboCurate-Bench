@@ -156,6 +156,8 @@ def mde(
     """
     if n_cleaner_runs < 2 or n_placebo_runs < 2:
         raise ValueError("need >= 2 runs per group")
+    if sigma_run == 0:
+        return 0.0  # zero run-to-run spread: any nonzero difference is detectable
     n1, n2 = n_cleaner_runs, n_placebo_runs
     s1, s2 = sigma_run**2 / n1, sigma_run**2 / n2
     df = (s1 + s2) ** 2 / (s1**2 / (n1 - 1) + s2**2 / (n2 - 1))

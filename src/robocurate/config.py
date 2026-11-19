@@ -303,6 +303,37 @@ def load_grid(path: str | Path, mode: Mode = "plan") -> GridConfig:
     return _build(GridConfig, load_yaml(path), path, mode)
 
 
+# ---------------------------------------------------------------------------- calibration
+
+
+@dataclass(repr=False, eq=False)
+class CalibrationConfig(_Guarded):
+    name: str
+    task: str
+    protocol: str
+    dataset: str
+    train_seeds: list[int]
+    steps: Any
+    n_final_rollouts: int
+    n_intermediate_rollouts: int
+    intermediate_save_freq: Any
+
+    def __post_init__(self) -> None:
+        if object.__getattribute__(self, "n_final_rollouts") < 200:
+            raise ConfigError("n_final_rollouts must be >= 200 (CLAUDE.md rule 2)")
+
+
+def load_calibration(path: str | Path, mode: Mode = "plan") -> CalibrationConfig:
+    path = Path(path)
+    return _build(CalibrationConfig, load_yaml(path), path, mode)
+
+
+def config_type(path: str | Path) -> str:
+    """'grid' or 'calibration', by keys (no side effects)."""
+    d = load_yaml(path)
+    return "calibration" if "dataset" in d and "train_seeds" in d else "grid"
+
+
 def resolve_config_path(p: str | Path, base: Path | None = None) -> Path:
     """Resolve a config path relative to the repo root unless absolute."""
     p = Path(p)

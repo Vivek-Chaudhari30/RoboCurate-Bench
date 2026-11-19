@@ -213,3 +213,8 @@ def test_power_20pp_at_seed_floor():
     from robocurate.config import SEED_FLOOR
 
     assert power_detect_rate(n_seeds=SEED_FLOOR) >= 0.70
+
+
+def test_mde_zero_sigma_regression():
+    """Regression: mde() raised ZeroDivisionError when all placebo runs had identical success rates."""
+    assert S.mde(0.0, 3, 3) == 0.0

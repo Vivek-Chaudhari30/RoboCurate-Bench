@@ -1,0 +1,11 @@
+# FAKE backend parameters for the end-to-end pipeline test. NOT a protocol config; only valid with --backend fake.
+# Known injected effects: oracle +0.25, length_heuristic +0.0. 6 train seeds = the D-015 seed floor.
+base: 0.5
+sigma_seed: 0.06
+train_seeds: [0, 1, 2, 3, 4, 5]
+effects:
+  full: 0.0
+  random: 0.0
+  "cleaner:length_heuristic": 0.0
+  oracle: 0.25
+sleep_s: 0.25

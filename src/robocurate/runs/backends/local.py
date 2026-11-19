@@ -60,7 +60,7 @@ def require_gpu_env(env: dict[str, str] | None = None) -> None:
 class LocalBackend:
     name = "local"
 
-    def __init__(self, plan: Plan, kind: str, dataset_repo_id: str, dataset_root: str | Path,
+    def __init__(self, plan: Plan, kind: str, dataset_repo_id: str, dataset_root: str | Path | None,
                  command_line: list[str] | None = None, device: str = "cuda"):
         require_gpu_env()
         require_storage_env()
@@ -69,11 +69,11 @@ class LocalBackend:
         self.kind = kind
         self.plan = plan
         self.repo_id = dataset_repo_id
-        self.root = Path(dataset_root)
+        self.root = Path(dataset_root) if dataset_root else None  # None -> HF cache (Hub dataset)
         self.device = device
         self.command_line = command_line or list(sys.argv)
         self._view = None
-        steps = plan.task.raw("steps")
+        steps = plan.steps
         if is_tbd(steps):
             raise ConfigError("task.steps is TBD; the local backend needs measured values (D-014)")
         self.steps = int(steps)
@@ -112,6 +112,8 @@ class LocalBackend:
             from robocurate.data.labels import load_labels, sidecar_path
             from robocurate.runs.oracle import oracle_select
 
+            if self.root is None:
+                raise ConfigError("oracle needs a local mixture dataset root (labels sidecar)")
             return oracle_select(load_labels(sidecar_path(self.root)), k, v.episode_indices)
         raise ValueError(c.kind)
 
@@ -128,7 +130,12 @@ class LocalBackend:
     def run(self, spec: RunSpec, rid: str) -> dict[str, Any]:
         from robocurate.data.subset import materialize_subset
         from robocurate.eval.lerobot_eval import build_eval_cmd, parse_eval_info
-        from robocurate.train.lerobot_train import SubsetDataset, build_train_cmd, final_checkpoint
+        from robocurate.train.lerobot_train import (
+            SubsetDataset,
+            build_train_cmd,
+            checkpoint_dir,
+            final_checkpoint,
+        )
 
         t0 = time.time()
         p = self.plan.protocol
@@ -136,7 +143,14 @@ class LocalBackend:
         episodes = self.select(spec)
         sub_root = materialize_subset(self.repo_id, self.root, episodes, run_dir / "subset")
         sub = SubsetDataset(f"{self.repo_id}_train", sub_root)
-        train_cmd = build_train_cmd(self.plan.task, spec, sub, run_dir / "train", device=self.device)
+        save_freq = None
+        if self.plan.kind == "calibration":
+            sf = self.plan.grid.raw("intermediate_save_freq")
+            if is_tbd(sf):
+                raise ConfigError("calibration intermediate_save_freq is TBD")
+            save_freq = int(sf)
+        train_cmd = build_train_cmd(self.plan.task, spec, sub, run_dir / "train", save_freq=save_freq,
+                                    steps=self.steps, device=self.device)
         peak_train = self._run(train_cmd, run_dir / "train.log")
         ckpt = final_checkpoint(run_dir / "train", self.steps)
         n = p.n_eval_rollouts
@@ -145,6 +159,19 @@ class LocalBackend:
                                   output_dir=run_dir / "eval", device=self.device)
         peak_eval = self._run(eval_cmd, run_dir / "eval.log")
         pes = parse_eval_info(run_dir / "eval", n)
+        intermediate = []
+        if self.plan.kind == "calibration":  # diagnostics only; results use the final checkpoint (D-003)
+            n_mid = int(self.plan.grid.raw("n_intermediate_rollouts"))
+            for step in range(save_freq, self.steps, save_freq):
+                ck = checkpoint_dir(run_dir / "train", step, self.steps)
+                out = run_dir / f"eval_step{step}"
+                bs = min(n_mid, int(self.plan.task.raw("eval_batch_size")))
+                cmd = build_eval_cmd(ck, n_mid, p.eval_seed_start, bs,
+                                     env_type=self.plan.task.env_type, env_task=self.plan.task.env_task,
+                                     output_dir=out, device=self.device)
+                self._run(cmd, out.with_suffix(".log"))
+                mid = parse_eval_info(out, n_mid)
+                intermediate.append({"step": step, "n": n_mid, "success_rate": sum(mid) / n_mid})
         k = sum(pes)
         peaks = [x for x in (peak_train, peak_eval) if x is not None]
         return results.RunResult(
@@ -166,5 +193,5 @@ class LocalBackend:
             wall_clock_s=time.time() - t0,
             peak_gpu_mem_mb=max(peaks) if peaks else None,
             hostname=results.hostname(),
-            extra={"selected_episodes": episodes, "run_dir": str(run_dir)},
+            extra={"selected_episodes": episodes, "run_dir": str(run_dir), "intermediate": intermediate},
         ).to_dict()

@@ -80,7 +80,7 @@ class FakeBackend:
         if self.params.sleep_s:
             time.sleep(self.params.sleep_s)
         k, n = sum(pes), len(pes)
-        steps = self.plan.task.raw("steps")
+        steps = self.plan.steps
         cfgs = [
             results.ConfigRef(path=str(c.path), sha256=c.sha256)
             for c in (self.plan.protocol, self.plan.task, self.plan.grid)

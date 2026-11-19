@@ -38,6 +38,12 @@ class Plan:
     units: list[Unit]
     train_seeds: Any  # list[int] or TBD
     notes: list[str] = field(default_factory=list)
+    steps_override: Any = None  # calibration configs carry their own step count
+    kind: str = "grid"  # "grid" | "calibration"
+
+    @property
+    def steps(self) -> Any:
+        return self.steps_override if self.kind == "calibration" else self.task.raw("steps")
 
     @property
     def n_runs(self) -> Any:
@@ -69,7 +75,8 @@ class Plan:
         n_seeds = "TBD" if is_tbd(seeds) else str(len(seeds))
         per = self.task.raw("per_run_gpu_h")
         lines = [
-            f"grid: {self.grid.name}   task: {self.task.name}   budgets: {self.grid.budgets}",
+            f"{self.kind}: {self.grid.name}   task: {self.task.name}   "
+            f"budgets: {getattr(self.grid, 'budgets', [1.0])}",
             f"train seeds: {seeds}  (n = {n_seeds})",
             f"condition cells: {len(self.units)}",
         ]
@@ -77,7 +84,7 @@ class Plan:
             sub = f"  subset {u.subset_index} (seed {u.subset_seed})" if u.subset_index is not None else ""
             lines.append(f"  - {u.condition.label:<28} budget {u.budget}{sub}")
         lines.append(f"runs: {len(self.units)} cells x {n_seeds} seeds = {self.n_runs}")
-        lines.append(f"steps per run: {self.task.raw('steps')}")
+        lines.append(f"steps per run: {self.steps}")
         lines.append(f"per-run GPU-h: {per}   total GPU-h: {self.gpu_hours}")
         lines += [f"note: {n}" for n in self.notes]
         return lines
@@ -122,3 +129,17 @@ def make_plan(
     else:
         seeds = protocol.raw("train_seeds")
     return Plan(grid, protocol, task, build_units(grid, protocol), seeds, notes)
+
+
+def make_calibration_plan(cal_path: str, mode: str = "calibration") -> Plan:
+    from robocurate.config import load_calibration
+
+    cal = load_calibration(cal_path, mode=mode)
+    protocol = load_protocol(resolve_config_path(cal.protocol), mode=mode)
+    task = load_task(resolve_config_path(cal.task), mode=mode)
+    units = [Unit(Condition.full(), 1.0, None, None)]
+    notes = [f"calibration on {cal.dataset}: full data, {cal.n_final_rollouts} final rollouts, "
+             f"{cal.n_intermediate_rollouts} rollouts at intermediate checkpoints "
+             f"(save every {cal.raw('intermediate_save_freq')} steps)"]
+    return Plan(cal, protocol, task, units, list(cal.train_seeds), notes,
+                steps_override=cal.raw("steps"), kind="calibration")
