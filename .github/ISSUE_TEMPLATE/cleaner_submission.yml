@@ -1,0 +1,71 @@
+name: Cleaner submission
+description: Propose a data cleaner (episode filter or weighting method) for RoboCurate-Bench.
+title: "[cleaner] <name>"
+labels: ["cleaner-submission"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for submitting a cleaner. Read [docs/submit.md](../../blob/main/docs/submit.md) first.
+        Please also open a pull request that adds your package (for example under `submissions/<name>/`);
+        the `submit` workflow then runs `robocurate submit` on it and posts the conformance result.
+  - type: input
+    id: name
+    attributes:
+      label: Cleaner name and version
+      description: Must equal the entry-point key and the class's `name` / `version`.
+      placeholder: my_cleaner 1
+    validations:
+      required: true
+  - type: dropdown
+    id: track
+    attributes:
+      label: Track (D-020)
+      options:
+        - selection (select(view, budget, rng) -> episode ids)
+        - weighting (frame_progress(view, rng) -> per-frame progress, trained with LeRobot RA-BC)
+    validations:
+      required: true
+  - type: dropdown
+    id: implementation
+    attributes:
+      label: Implementation
+      options:
+        - original
+        - wrapped (an existing tool, pinned)
+        - reimplementation (of a published method)
+    validations:
+      required: true
+  - type: textarea
+    id: source
+    attributes:
+      label: Source and citation
+      description: Paper (arXiv ID, venue, sections used), code repo@commit and license.
+    validations:
+      required: true
+  - type: textarea
+    id: resources
+    attributes:
+      label: Declared resources (D-022)
+      description: requires_rollouts (<= 100, curation seeds only), requires_reference_policy, requires_gpu, requires_dataset_root.
+      render: python
+    validations:
+      required: true
+  - type: textarea
+    id: submit_output
+    attributes:
+      label: Output of `robocurate submit <name>`
+      render: text
+    validations:
+      required: true
+  - type: checkboxes
+    id: rules
+    attributes:
+      label: Rules
+      options:
+        - label: The cleaner never reads ground-truth labels, eval code, eval seeds or eval results (CLAUDE.md rule 7).
+          required: true
+        - label: Nothing was or will be tuned on benchmark results; changes after results ship as a new version (rule 9).
+          required: true
+        - label: The license allows the benchmark to install and run the code.
+          required: true

@@ -1,0 +1,41 @@
+# Cleaner submissions: on a pull request that adds or changes a cleaner package (a pyproject.toml declaring
+# entry points in the `robocurate.cleaners` group, e.g. under submissions/ or examples/), run `robocurate submit`
+# for each declared cleaner on CPU and post the conformance result as the job summary. No GPU, no secrets.
+name: submit
+on:
+  pull_request:
+    paths:
+      - "submissions/**"
+      - "examples/**"
+permissions:
+  contents: read
+jobs:
+  conformance:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      CUDA_VISIBLE_DEVICES: ""
+      PYTHONNOUSERSITE: "1"
+      MUJOCO_GL: egl
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # needs the base branch for the diff
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12.16"
+          cache: pip
+          cache-dependency-path: requirements.lock
+      - name: Storage env (outside the repo, as CLAUDE.md requires)
+        run: |
+          echo "ROBOCURATE_SCRATCH=$RUNNER_TEMP/rcb-scratch" >> "$GITHUB_ENV"
+          echo "HF_HOME=$RUNNER_TEMP/rcb-scratch/hf" >> "$GITHUB_ENV"
+          echo "HF_LEROBOT_HOME=$RUNNER_TEMP/rcb-scratch/lerobot" >> "$GITHUB_ENV"
+          mkdir -p "$RUNNER_TEMP/rcb-scratch"
+      - name: Install the benchmark (exact lock; CPU torch wheels)
+        run: |
+          python -m pip install --upgrade pip==25.3
+          pip install -r requirements.lock --index-url https://download.pytorch.org/whl/cpu --extra-index-url https://pypi.org/simple
+          pip install -e . --no-deps
+      - name: Conformance of changed cleaner packages
+        run: python scripts/ci_submit.py --base "origin/${{ github.base_ref }}" --install --summary "$GITHUB_STEP_SUMMARY"

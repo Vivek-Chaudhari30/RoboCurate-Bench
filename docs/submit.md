@@ -75,10 +75,33 @@ a mock progress model. It checks the contract, not your method's quality.
 
 ## 5. Propose it
 
-Open a pull request that adds your package as a pinned dependency or a vendored module, with:
-- the `robocurate submit` output;
-- a citation for the method;
-- whether it is original, wrapped (repo@commit, license) or a reimplementation (paper sections).
+1. **Open an issue** with the "Cleaner submission" form (`.github/ISSUE_TEMPLATE/cleaner_submission.yml`). It asks
+   for:
+   - the name, version, track and implementation type;
+   - the citation (paper sections, repo@commit, license);
+   - the declared resources;
+   - your `robocurate submit` output;
+   - three rule confirmations: no labels or eval access, no tuning on results, a license that allows the benchmark
+     to run the code.
+2. **Open a pull request** that adds your package as its own directory under `submissions/<name>/`. It must be an
+   installable package whose `pyproject.toml` declares your cleaner in the `robocurate.cleaners` entry-point group,
+   like `examples/cleaner_template`.
+3. **CI runs conformance.** The `submit` workflow (`.github/workflows/submit.yml`) runs on pull requests that touch
+   `submissions/**` or `examples/**`. It:
+   - finds every changed package that declares `robocurate.cleaners` entry points;
+   - installs each one with `pip install -e --no-deps` into the locked benchmark environment, on CPU;
+   - runs `robocurate submit <name>` for each declared cleaner;
+   - posts a PASS/FAIL table with the full output as the job summary.
+
+   It has no GPU and no secrets, and its token is read-only. You can run the same check locally:
+
+   ```bash
+   python scripts/ci_submit.py --changed submissions/<name>/pyproject.toml --install
+   ```
+
+4. **Maintainers review** the method, the citation and the license, then add the entrant to the next grid version.
+   An entrant must also pass its toybed sanity check with published defaults before it is enabled. A failing
+   entrant is disabled and never tuned (see CUPID, D-029).
 
 Do not tune anything on benchmark results (CLAUDE.md rule 9). Changes after results ship as a new version.
 
@@ -87,9 +110,13 @@ Do not tune anything on benchmark results (CLAUDE.md rule 9). Changes after resu
 1. `robocurate prepare <grid>` caches your selection or weights.
 2. `robocurate run <grid>` trains every condition, with identical training settings, on fixed seeds:
    - your entrant;
-   - at least 8 size-matched random subsets (or weight permutations);
+   - K >= 8 size-matched random subsets (or weight permutations);
    - full data;
    - a label oracle as a reference.
+
+   Every condition uses the same number n >= 3 of training seeds (D-026).
 3. Each final checkpoint is evaluated with at least 200 rollouts on protocol eval seeds.
-4. `robocurate report --site` applies the primary test: the D-016 variance-component SE with df = K − 1 (D-019),
-   Holm-corrected across entrants. Negative results are reported exactly like positive ones.
+4. `robocurate report --site` applies the primary test, the exact balanced prediction t-test (D-026,
+   df = K − 1), Holm-corrected across the entrants of a track. It also reports a 95% CI, the minimum detectable
+   effect and a pre-registered label: positive, negative, no detectable effect or inconclusive
+   (docs/preregistration.md). Negative results are reported exactly like positive ones.
