@@ -32,6 +32,7 @@ robocurate = ["py.typed"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["tests"]
 addopts = "-ra --strict-markers"
 markers = [
     "gpu: needs a GPU (never run in CPU-only tasks)",
