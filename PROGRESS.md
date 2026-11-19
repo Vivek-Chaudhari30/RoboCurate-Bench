@@ -35,6 +35,7 @@ Start 2026-11-19T16:32Z (`caffeinate -dims -t 43200`). Env: rcb (py3.12, lerobot
 | UTC | item | what changed | tests | outcome |
 |---|---|---|---|---|
 | 2026-11-19T16:34Z | 1 decisions | D-027..D-032 appended verbatim to DECISIONS.md; protocol.yaml random_subset_seeds 2000–2011, weight_permutation_seeds 3000–3011 (approved); test:d026_balanced and floor-3 comments kept; two tests updated for the new lists | default 227 passed + 1 xfailed; ruff clean | done |
+| 2026-11-19T16:37Z | 2 D-028 | weights.py: permute_progress_curves replaces permute_weight_curves/write_weights_parquet (no rescale); prepare writes perm{i}_progress.parquet (RA-BC schema, rabc.py:101-126) and records placebo_progress_parquets, weighting_placebo D-028; local backend placebo refusal removed (permutation subset_index -> its parquet); CLI print updated. Tests: shapes, identity exact, seeded, resample/no-rescale, golden rabc vs placebo cmd differ only in progress path, LeRobot make_sample_weighter/RABCWeights (utils/sample_weighting.py:103-185, rabc.py:175-233) accept placebo files with finite weights. B-005 and B-006 closed. | default 227 passed + 1 xfailed; test_curation 23 passed; ruff clean | done |
 <!-- ng-log -->
 
 ## Previous status (B-003/M0-launch task, STOPPED at Step 1, B-004; superseded by D-026)
@@ -369,7 +370,7 @@ d = 4000, lambda = 0, m = 100).
 
 ## Blocked
 
-- **B-006 (2026-11-19T15:10Z, OPEN) — no scratch path on hokkaido; Step 2 outcome (c), Step 3 skipped.**
+- **B-006 (CLOSED by D-027: /share/datasets/robocurate; 2026-11-19T15:10Z, OPEN) — no scratch path on hokkaido; Step 2 outcome (c), Step 3 skipped.**
   - *Evidence (read-only).* `ssh hokkaido 'ls -ld /disk /disk/u; ls /disk; ...'`: "ls: cannot access '/disk': No such
     file or directory" (twice). Mounts: `/` = local NVMe `/dev/nvme0n1p2` (1.8 T, 98% used, 52 G free);
     `/share/NFS` (baushare, 104 T, 31 T free); `/share/datasets` (baunas24, 98 T, 42 T free). `$HOME` =
@@ -390,7 +391,12 @@ d = 4000, lambda = 0, m = 100).
     `/tmp/vivek-robocurate` (fast, but 52 G free on a 98%-full system disk; the wiki says not to write outside
     `/share` and `/disk`). (4) `$HOME` is excluded by CLAUDE.md.
 
-- **B-005 (2026-11-19T15:30Z, OPEN) — the D-025 placebo cannot be trained with LeRobot 0.6.1 as is.**
+- **B-005 (2026-11-19T15:30Z; CLOSED 2026-11-19 by D-028, option (2)) — the D-025 placebo cannot be trained with LeRobot 0.6.1 as is.**
+  - *Closure.* D-028 permutes whole progress curves (normalized-time resampling, no rescale); `prepare` writes
+    `perm{i}_progress.parquet` in the entrant's RA-BC schema (index, episode_index, frame_index, progress_sparse;
+    rabc.py:101-126) and the local backend passes permutation `subset_index` as `--sample_weighting.progress_path`.
+    Tests: golden (rabc vs placebo train cmds differ only in the progress path), LeRobot's own
+    `make_sample_weighter` + `RABCWeights` accept every placebo file and give finite, batch-normalized weights.
   - *Fact.* lerobot-train applies per-sample weights only via `--sample_weighting.type` in {rabc, uniform}
     (utils/sample_weighting.py:125-132, no hook for precomputed weights). RA-BC computes weights from a progress
     parquet: delta = progress[t + chunk_size] − progress[t] (last frame near the end, rewards/sarm/rabc.py:237-260),

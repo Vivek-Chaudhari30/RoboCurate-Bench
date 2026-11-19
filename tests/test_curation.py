@@ -16,8 +16,7 @@ from robocurate.curation import prepare as P
 from robocurate.curation.context import ReferencePolicy, ReferencePolicyModified
 from robocurate.curation.rollouts import GymRolloutBackend, RolloutError, RolloutService
 from robocurate.curation.weights import (
-    permute_progress,
-    permute_weight_curves,
+    permute_progress_curves,
     policy_chunk_size,
     rabc_frame_weights,
     write_progress_parquet,
@@ -204,15 +203,14 @@ def test_prepare_weighting_cell_writes_rabc_parquets(tmp_path):
     df = pd.read_parquet(rec["progress_parquet"])
     assert list(df.columns) == ["index", "episode_index", "frame_index", "progress_sparse"]
     assert len(df) == sum(view.lengths().values()) and df["index"].tolist() == list(range(len(df)))
-    assert len(rec["placebo_weight_parquets"]) == 8
+    assert len(rec["placebo_progress_parquets"]) == 8
     assert rec["inputs"]["weight_permutation_seeds"] == list(range(3000, 3008))
-    assert rec["inputs"]["rabc_chunk_size"] == 5 and rec["inputs"]["weighting_placebo"] == "D-025"
-    ent = pd.read_parquet(rec["entrant_weights_parquet"])
-    assert list(ent.columns) == ["index", "episode_index", "frame_index", "weight"] and len(ent) == len(df)
-    for path in rec["placebo_weight_parquets"].values():
-        pl = pd.read_parquet(path)
-        assert pl["index"].tolist() == ent["index"].tolist()  # same frames, D-025 resampled onto each episode
-        assert pl["weight"].mean() == pytest.approx(ent["weight"].mean(), abs=1e-9)
+    assert rec["inputs"]["rabc_chunk_size"] == 5 and rec["inputs"]["weighting_placebo"] == "D-028"
+    for path in rec["placebo_progress_parquets"].values():
+        pl = pd.read_parquet(path)  # D-028: exactly the entrant's RA-BC schema and frame layout
+        assert list(pl.columns) == list(df.columns) and pl["index"].tolist() == df["index"].tolist()
+        assert pl["episode_index"].tolist() == df["episode_index"].tolist()
+        assert pl["progress_sparse"].between(0, 1).all()
     with pytest.raises(P.PrepareError, match="rabc_chunk_size"):
         P.prepare_cell(cell, _Weights(), view, PROTO, P.fake_context_factory(PROTO, view, tmp_path)(_Weights()),
                        tmp_path / "x", "fake")
@@ -226,69 +224,103 @@ def _curves():
     return {i: rng.uniform(0, 1, n) for i, n in enumerate([12, 40, 7, 25, 33, 18])}
 
 
-def test_d025_shapes_match_target_lengths():
+def test_d028_shapes_match_target_lengths():
     w = _curves()
-    for seed in (3000, 3001, 3007):
-        out = permute_weight_curves(w, seed)
+    for seed in (3000, 3001, 3011):
+        out = permute_progress_curves(w, seed)
         assert set(out) == set(w) and all(len(out[e]) == len(w[e]) for e in w)
 
 
-def test_d025_preserves_global_mean():
+def test_d028_identity_permutation_is_exact():
     w = _curves()
-    orig = np.concatenate([w[e] for e in sorted(w)]).mean()
-    for seed in range(3000, 3008):
-        out = permute_weight_curves(w, seed)
-        assert abs(np.concatenate([out[e] for e in sorted(out)]).mean() - orig) <= 1e-9
-
-
-def test_d025_identity_permutation_is_exact():
-    w = _curves()
-    out = permute_weight_curves(w, perm=np.arange(len(w)))
+    out = permute_progress_curves(w, perm=np.arange(len(w)))
     assert all(np.array_equal(out[e], w[e]) for e in w)
 
 
-def test_d025_seeded_and_moves_curves():
+def test_d028_seeded_and_moves_curves():
     w = _curves()
-    a, b, c = permute_weight_curves(w, 3000), permute_weight_curves(w, 3000), permute_weight_curves(w, 3001)
+    a, b, c = permute_progress_curves(w, 3000), permute_progress_curves(w, 3000), permute_progress_curves(w, 3001)
     assert all(np.array_equal(a[e], b[e]) for e in w)
     assert any(not np.allclose(a[e], c[e]) for e in w)
+    assert np.array_equal(np.random.default_rng(3000).permutation(len(w)),
+                          np.random.default_rng(3000).permutation(len(w)))
 
 
-def test_d025_whole_curve_resampled_by_normalized_time():
-    """Episode e gets episode perm[e]'s whole curve, linearly resampled onto len(e), then one global rescale."""
-    w = {0: np.array([0.0, 1.0]), 1: np.array([2.0, 2.0, 2.0, 2.0, 2.0])}
-    out = permute_weight_curves(w, perm=np.array([1, 0]))
-    raw0, raw1 = np.full(2, 2.0), np.linspace(0.0, 1.0, 5)
-    factor = np.concatenate([w[0], w[1]]).mean() / np.concatenate([raw0, raw1]).mean()
-    assert np.allclose(out[0], raw0 * factor) and np.allclose(out[1], raw1 * factor)
+def test_d028_whole_curve_resampled_by_normalized_time_no_rescale():
+    """Episode e gets episode perm[e]'s whole curve, linearly resampled onto len(e); no global rescale (D-028)."""
+    w = {0: np.array([0.0, 1.0]), 1: np.array([0.2, 0.2, 0.2, 0.2, 0.2])}
+    out = permute_progress_curves(w, perm=np.array([1, 0]))
+    assert np.allclose(out[0], [0.2, 0.2]) and np.allclose(out[1], np.linspace(0.0, 1.0, 5))
+    pool = {i: np.linspace(0, 1, 20) ** (i + 1) for i in range(6)}  # equal lengths: same pool of curves
+    key = lambda d: sorted(tuple(np.round(v, 12)) for v in d.values())  # noqa: E731
+    assert key(permute_progress_curves(pool, 7)) == key(pool)
     with pytest.raises(ValueError, match="permutation"):
-        permute_weight_curves(w, perm=np.array([0, 0]))
+        permute_progress_curves(w, perm=np.array([0, 0]))
+    with pytest.raises(ValueError, match="finite"):
+        permute_progress_curves({0: np.array([np.nan])}, 1)
 
 
 def test_policy_chunk_size_from_lerobot_config():
     assert policy_chunk_size("act") == 100  # lerobot policies/act/configuration_act.py:85
 
 
-def test_local_backend_refuses_d025_placebo_runs(tmp_path):
-    from robocurate.runs.backends.local import LocalBackend, LocalBackendRefused
+def _prepared_weighting(tmp_path):
+    view = synthetic_view(6)
+    cell = P.Cell("aloha_transfer_cube", "weighting", "flat_weights", "1", 1.0, 0, 8)
+    return P.prepare_cell(cell, _Weights(), view, PROTO, P.fake_context_factory(PROTO, view, tmp_path)(_Weights()),
+                          tmp_path, "fake", rabc_chunk_size=5)
+
+
+def test_local_backend_feeds_d028_placebo_through_rabc(tmp_path):
+    """Regression (B-005 closed by D-028): placebo runs are no longer refused; permutation i -> perm{i} parquet."""
+    from robocurate.runs.backends.local import LocalBackend
     from robocurate.runs.spec import Condition, RunSpec
 
+    rec = _prepared_weighting(tmp_path)
     be = LocalBackend.__new__(LocalBackend)  # only progress_parquet is exercised
-    spec = RunSpec("t", Condition.weight_placebo("rabc", "1"), 1.0, 0, 0)
-    with pytest.raises(LocalBackendRefused, match="B-005"):
-        be.progress_parquet(spec)
+    be.record = lambda spec: rec
+    for i in range(8):
+        spec = RunSpec("aloha_transfer_cube", Condition.weight_placebo("flat_weights", "1"), 1.0, i, 0)
+        assert be.progress_parquet(spec) == Path(rec["placebo_progress_parquets"][str(i)])
+    ent = RunSpec("aloha_transfer_cube", Condition.weighting("flat_weights", "1"), 1.0, None, 0)
+    assert be.progress_parquet(ent) == Path(rec["progress_parquet"])
+    with pytest.raises(RuntimeError, match="permutation 8"):
+        be.progress_parquet(RunSpec("aloha_transfer_cube", Condition.weight_placebo("flat_weights", "1"), 1.0, 8, 0))
 
 
-def test_permute_progress_preserves_pool_and_is_seeded():
-    prog = {i: np.linspace(0, 1, 20) ** (i + 1) for i in range(6)}
-    a, b, c = permute_progress(prog, 1), permute_progress(prog, 1), permute_progress(prog, 2)
-    assert all(np.array_equal(a[i], b[i]) for i in prog)
-    assert any(not np.array_equal(a[i], c[i]) for i in prog)
-    key = lambda d: sorted(tuple(np.round(v, 12)) for v in d.values())  # noqa: E731
-    assert key(a) == key(prog)  # same pool of curves (equal lengths)
-    var = {0: np.linspace(0, 1, 10), 1: np.linspace(0, 1, 30) ** 2}
-    pv = permute_progress(var, 0)
-    assert len(pv[0]) == 10 and len(pv[1]) == 30
+def test_golden_rabc_and_placebo_train_cmds_differ_only_in_progress_path(tmp_path):
+    from robocurate.runs.backends.local import LocalBackend
+
+    task, _ = _task(tmp_path)
+    rec = _prepared_weighting(tmp_path / "prep")
+    be = LocalBackend.__new__(LocalBackend)
+    be.record = lambda spec: rec
+    sub = SubsetDataset("robocurate/task_a_v0_train", Path("/SUBSET"))
+    specs = [RunSpec("aloha_transfer_cube", Condition.weighting("flat_weights", "1"), 1.0, None, 7)] + [
+        RunSpec("aloha_transfer_cube", Condition.weight_placebo("flat_weights", "1"), 1.0, i, 7) for i in (0, 5)]
+    cmds = [build_train_cmd(task, sp, sub, Path("/OUT/train"), sample_weighting_progress=be.progress_parquet(sp))
+            for sp in specs]
+    for other in cmds[1:]:
+        diff = [(a, b) for a, b in zip(cmds[0], other, strict=True) if a != b]
+        assert len(diff) == 1 and all(x.startswith("--sample_weighting.progress_path=") for x in diff[0])
+
+
+def test_lerobot_rabc_loader_accepts_permuted_progress(tmp_path):
+    """CPU integration: LeRobot's own factory + RABCWeights load a D-028 placebo parquet and give finite weights."""
+    import types
+
+    import torch
+    from lerobot.utils.sample_weighting import SampleWeightingConfig, make_sample_weighter
+
+    rec = _prepared_weighting(tmp_path)
+    policy = types.SimpleNamespace(config=types.SimpleNamespace(chunk_size=5))
+    n = int(rec["progress_summary"]["n_frames"])
+    for path in [rec["progress_parquet"], *rec["placebo_progress_parquets"].values()]:
+        cfg = SampleWeightingConfig(type="rabc", progress_path=str(path), head_mode="sparse")
+        wt = make_sample_weighter(cfg, policy, torch.device("cpu"))
+        w, stats = wt.compute_batch_weights({"index": torch.arange(n)})
+        assert w.shape == (n,) and torch.isfinite(w).all() and (w >= 0).all()
+        assert abs(float(w.sum()) - n) < 1e-2 * n  # rabc.py:232-233 batch normalization
 
 
 def test_rabc_weights_match_lerobot_rabcweights(tmp_path):

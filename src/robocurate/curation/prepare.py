@@ -4,7 +4,7 @@
 Runs never call a cleaner; they only read this cache (`load_record`).
 
 Cache layout: <cache>/<task>/<name>-v<version>/budget<b>-rep<r>.json (+ progress.parquet, weights.parquet and
-perm<i>_weights.parquet for the weighting track, D-025). The record's `key` is sha256 over the inputs: dataset
+perm<i>_progress.parquet for the weighting track, D-028). The record's `key` is sha256 over the inputs: dataset
 fingerprint (label-free view), budget, replicate, cleaner name/version, protocol tie_break_salt,
 max_curation_rollouts, selection seed, reference-policy tree hash, progress-model revision and (weighting) the
 RA-BC chunk size. A record whose inputs no longer match is stale and is recomputed.
@@ -30,10 +30,9 @@ from robocurate.curation.context import CurationContext, ReferencePolicy
 from robocurate.curation.progress import CachedProgress, MockProgressModel
 from robocurate.curation.rollouts import RolloutResult, RolloutService
 from robocurate.curation.weights import (
-    permute_weight_curves,
+    permute_progress_curves,
     rabc_frame_weights,
     write_progress_parquet,
-    write_weights_parquet,
 )
 from robocurate.data.episodes import DatasetView, synthetic_view
 
@@ -161,7 +160,7 @@ def _inputs(cell: Cell, cleaner: Cleaner, view: DatasetView, protocol: Any, ctx:
         "weight_permutation_seeds": list(protocol.weight_permutation_seeds or [])[: cell.n_permutations]
         if cell.kind == "weighting" else None,
         "rabc_chunk_size": rabc_chunk_size if cell.kind == "weighting" else None,
-        "weighting_placebo": "D-025" if cell.kind == "weighting" else None,
+        "weighting_placebo": "D-028" if cell.kind == "weighting" else None,
     }
 
 
@@ -169,7 +168,7 @@ def prepare_cell(cell: Cell, cleaner: Cleaner, view: DatasetView, protocol: Any,
                  cache_dir: str | Path, backend: str, rabc_chunk_size: int | None = None) -> dict[str, Any]:
     """rabc_chunk_size: the trained policy's chunk_size (RA-BC delta horizon); required for weighting cells."""
     if cell.kind == "weighting" and not rabc_chunk_size:
-        raise PrepareError("weighting cells need rabc_chunk_size (the policy's chunk_size) for the D-025 placebo")
+        raise PrepareError("weighting cells need rabc_chunk_size (the policy's chunk_size) for the RA-BC delta horizon")
     problems = validate_resources(cleaner, protocol.max_curation_rollouts)
     if problems:
         raise PrepareError(f"{cleaner.name}: invalid resource declaration: {problems}")
@@ -213,13 +212,13 @@ def prepare_cell(cell: Cell, cleaner: Cleaner, view: DatasetView, protocol: Any,
             d = out.parent / out.stem
             meta = {"cleaner": f"{cleaner.name}@{cleaner.version}", "key": key}
             rec["progress_parquet"] = str(write_progress_parquet(prog, d / "progress.parquet", meta))
-            # D-025 placebo: permute the entrant's RA-BC frame-weight curves across episodes, resample, rescale
-            w = rabc_frame_weights(prog, chunk_size=int(rabc_chunk_size))
-            rec["entrant_weights_parquet"] = str(write_weights_parquet(w, d / "weights.parquet", meta))
-            rec["placebo_weight_parquets"] = {
-                str(i): str(write_weights_parquet(permute_weight_curves(w, s), d / f"perm{i}_weights.parquet",
-                                                  {**meta, "permutation_seed": s, "placebo": "D-025"}))
+            # D-028 placebo: permute whole progress curves across episodes, resampled by normalized time; the
+            # files share the entrant's schema so LeRobot's RA-BC computes weights identically on both arms.
+            rec["placebo_progress_parquets"] = {
+                str(i): str(write_progress_parquet(permute_progress_curves(prog, s), d / f"perm{i}_progress.parquet",
+                                                   {**meta, "permutation_seed": s, "placebo": "D-028"}))
                 for i, s in enumerate(inputs["weight_permutation_seeds"])}
+            w = rabc_frame_weights(prog, chunk_size=int(rabc_chunk_size))  # reporting only (LeRobot recomputes)
             rec["mean_frame_weight"] = float(np.concatenate(list(w.values())).mean())
             rec["progress_summary"] = {"mean_final": float(np.mean([p[-1] for p in prog.values()])),
                                        "n_frames": int(sum(lens.values()))}

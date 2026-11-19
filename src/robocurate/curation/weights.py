@@ -6,16 +6,12 @@ parquet (columns index, episode_index, progress_<head_mode>; rewards/sarm/rabc.p
 deltas over chunk_size frames into per-frame weights (rabc.py:262-295, SARM paper Eq. 8-9). A weighting entrant
 therefore supplies per-frame PROGRESS; LeRobot's own RABCWeights computes the weights during training.
 
-Placebo (D-025, amends D-020): permute whole per-episode WEIGHT curves across episodes (`permute_weight_curves`).
-For permutation seed s, episode e receives the weight curve of episode pi_s(e), resampled onto len(e) by normalized
-time (linear interpolation); then every weight is rescaled so the dataset-wide mean frame weight equals the
-original. The entrant's weight curves are the RA-BC frame weights of its progress (`rabc_frame_weights`, which
-equals LeRobot's RABCWeights before batch normalization). `permute_progress` (the D-020 interpretation: permute
-progress curves, let RA-BC recompute weights) is kept only for reference; D-025 rejects it.
-
-LeRobot 0.6.1 normalizes each batch's weights to sum to the batch size (rabc.py:232-233) and divides the loss by
-the weight sum (lerobot_train.py:162), so a global rescale has no effect on LeRobot training; the rescale keeps the
-artifact's mean equal to the entrant's as D-025 specifies.
+Placebo (D-028, supersedes the weight-curve form of D-025): permute whole per-episode PROGRESS curves across
+episodes (`permute_progress_curves`). For permutation seed s, episode e (in sorted order) receives the progress curve
+of episode sorted[pi_s(e)], resampled onto len(e) by normalized time (linear interpolation, np.interp). The placebo
+parquet has exactly the entrant's schema, so lerobot-train runs the SAME RA-BC code on both arms; only
+`--sample_weighting.progress_path` differs. No global rescale: LeRobot normalizes each batch's weights to sum to the
+batch size (rabc.py:232-233) and divides the loss by the weight sum (lerobot_train.py:162).
 
 Global frame indices: the training dataset is the materialized full-data copy (episodes re-indexed 0..N-1 in
 sorted original-index order, frames contiguous), so index = cumulative length over sorted episodes.
@@ -37,15 +33,14 @@ def _resample(curve: np.ndarray, n: int) -> np.ndarray:
     return np.interp(np.linspace(0.0, 1.0, n), np.linspace(0.0, 1.0, len(curve)), curve)
 
 
-def permute_weight_curves(weights: dict[int, np.ndarray], seed: int | None = None,
-                          perm: np.ndarray | None = None) -> dict[int, np.ndarray]:
-    """D-025 weighting-track placebo. weights: per-episode frame-weight curves of the entrant.
+def permute_progress_curves(progress: dict[int, np.ndarray], seed: int | None = None,
+                            perm: np.ndarray | None = None) -> dict[int, np.ndarray]:
+    """D-028 weighting-track placebo. progress: the entrant's per-episode progress curves (values in [0, 1]).
 
-    Episode e (in sorted order) receives the curve of episode sorted[perm[i]], resampled onto len(e) by normalized
-    time (linear interpolation); then all weights are multiplied by one factor so the dataset-wide mean frame weight
-    equals the original. perm defaults to np.random.default_rng(seed).permutation(n_episodes).
-    """
-    eps = sorted(weights)
+    Episode e (in sorted order) receives the whole curve of episode sorted[perm[i]], resampled onto len(e) by
+    normalized time (linear interpolation). perm defaults to np.random.default_rng(seed).permutation(n_episodes).
+    Interpolation is a convex combination of neighbouring values, so outputs stay in the input range."""
+    eps = sorted(progress)
     if perm is None:
         if seed is None:
             raise ValueError("give a permutation seed or an explicit permutation")
@@ -53,44 +48,11 @@ def permute_weight_curves(weights: dict[int, np.ndarray], seed: int | None = Non
     perm = np.asarray(perm)
     if sorted(perm.tolist()) != list(range(len(eps))):
         raise ValueError("perm must be a permutation of range(n_episodes)")
-    out = {e: _resample(weights[eps[j]], len(weights[e])) for e, j in zip(eps, perm, strict=True)}
-    orig = np.concatenate([np.asarray(weights[e], dtype=np.float64) for e in eps])
-    new = np.concatenate([out[e] for e in eps])
-    if np.any(orig < 0) or not np.all(np.isfinite(orig)):
-        raise ValueError("weights must be finite and >= 0")
-    if new.mean() <= 0:
-        if orig.mean() == 0:
-            return out
-        raise ValueError("permuted weights have zero mean; cannot preserve the original mean")
-    factor = orig.mean() / new.mean()
-    return {e: out[e] * factor for e in eps}
-
-
-def write_weights_parquet(weights: dict[int, np.ndarray], path: str | Path, meta: dict[str, str] | None = None
-                          ) -> Path:
-    """Per-frame weights for a materialized dataset whose episodes are sorted(weights) (same index layout as the
-    RA-BC progress parquet). Columns: index, episode_index, frame_index, weight."""
-    import pyarrow as pa
-    import pyarrow.parquet as pq
-
-    idx, ep, fr, w = [], [], [], []
-    start = 0
-    for new_ep, e in enumerate(sorted(weights)):
-        x = np.asarray(weights[e], dtype=np.float64)
-        n = len(x)
-        idx.append(np.arange(start, start + n, dtype=np.int64))
-        ep.append(np.full(n, new_ep, dtype=np.int64))
-        fr.append(np.arange(n, dtype=np.int64))
-        w.append(x)
-        start += n
-    t = pa.table({"index": np.concatenate(idx), "episode_index": np.concatenate(ep),
-                  "frame_index": np.concatenate(fr), "weight": np.concatenate(w)})
-    if meta:
-        t = t.replace_schema_metadata({k.encode(): str(v).encode() for k, v in meta.items()})
-    path = Path(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    pq.write_table(t, path)
-    return path
+    for e in eps:
+        x = np.asarray(progress[e], dtype=np.float64)
+        if len(x) == 0 or not np.all(np.isfinite(x)):
+            raise ValueError("progress curves must be non-empty and finite")
+    return {e: _resample(progress[eps[j]], len(progress[e])) for e, j in zip(eps, perm, strict=True)}
 
 
 def policy_chunk_size(policy_type: str) -> int:
@@ -102,17 +64,6 @@ def policy_chunk_size(policy_type: str) -> int:
     if cs is None:
         raise ValueError(f"policy type {policy_type!r} has no chunk_size; RA-BC weighting needs one")
     return int(cs)
-
-
-def permute_progress(progress: dict[int, np.ndarray], seed: int) -> dict[int, np.ndarray]:
-    eps = sorted(progress)
-    perm = np.random.default_rng(seed).permutation(len(eps))
-    out = {}
-    for e, j in zip(eps, perm, strict=True):
-        src = np.asarray(progress[eps[j]], dtype=np.float64)
-        n = len(progress[e])
-        out[e] = src.copy() if len(src) == n else np.interp(np.linspace(0, 1, n), np.linspace(0, 1, len(src)), src)
-    return out
 
 
 def write_progress_parquet(progress: dict[int, np.ndarray], path: str | Path, meta: dict[str, str] | None = None
