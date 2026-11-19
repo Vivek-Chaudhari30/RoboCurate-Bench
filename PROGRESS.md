@@ -2,7 +2,30 @@
 
 ## Status 2026-11-19 (D-026 task, branch m1-core)
 
-In progress (see the sections below; the final summary is written at the end of the task).
+Commits on m1-core (pushed): `0003aa3` D-026 test + refusals + tables; `2fec523` D-025 placebo; `cb3a8d2` CUPID
+outcome (c); `33c196f` checkers installed; `d8e593e` eligibility labels; `896b22e` test-order fix; plus this
+summary. m0-calibration untouched (Step 3 skipped). GPU-h 0 (CPU only, Mac).
+
+- **Step 1 — D-026: done.** All 32 result-eligible FPR cells pass (max upper 95% 0.0451, MC SE <= 0.0005); fake
+  e2e K = 8, n = 3: oracle +0.197 (p = 0.0068) significant, length_heuristic −0.003 (p_holm 0.957) not. Refusals
+  for n_c != n_p, n < 3, K < 8 (subsets and permutations) unit-tested; protocol loader floor 3.
+- **Step 2 — scratch: outcome (c), B-006.** The lab wiki's scratch convention is local `/disk/u/<user>`; hokkaido
+  has no `/disk`. No directory created, no D-027. Candidates under B-006.
+- **Step 3 — skipped** (Step 2 unresolved). rcb-m0 does not exist. Hokkaido 15:10 UTC (read-only): GPU 82% /
+  27.6 GB used by another user's ~7-day process; no tmux server for this user.
+- **Step 4 — D-025: done (transform + tests + prepare artifacts); training path blocked, B-005.** LeRobot 0.6.1
+  takes RA-BC progress, not weights; the local backend refuses weight_placebo runs until a path is decided.
+- **Step 5 — checkers: done.** 4 installed + pinned (+ lock), all PASS `robocurate submit` and toybed sanity;
+  trajlens and retake skipped (reasons in the table).
+- **Step 6 — CUPID: outcome (c).** Disabled ("disabled — failed sanity"), refused in grids, excluded from the
+  leaderboard; LOO test confirms the influence formula; reference "square" output does not port to an MLP policy.
+- **Step 7 — labels: done.** "NOT RESULT-ELIGIBLE (design below protocol minimum)" on json/md/site/CLI.
+- Tests: default 227 passed + 1 xfailed (CUPID); slow 15 passed (incl. the hard D-026 null calibration, checker conformance, DemInf sanity, help-flag test); ruff clean.
+
+**Decisions needed:** (1) B-006 scratch path (or provision `/disk` on hokkaido); (2) B-005 how the D-025 placebo
+reaches lerobot-train; (3) confirm the protocol.yaml edits made for D-026 (`test: d026_balanced`; seed-floor
+comments 6 -> 3); (4) `random_subset_seeds` lists 3 seeds: K >= 8 result runs need 8 (e.g. 2000–2007) and the M0
+grid's K = 4 needs 2000–2003; (5) CUPID: build the diffusion-policy toybed variant (outcome b) or leave disabled.
 
 ## Previous status (B-003/M0-launch task, STOPPED at Step 1, B-004; superseded by D-026)
 
@@ -853,6 +876,16 @@ with `CUDA_VISIBLE_DEVICES=""` (scripts/env.sh, tests/conftest.py). `robocurate 
 when it is empty (tested). No lerobot-train or lerobot-eval job was run; only their `--help`. GPU-hours: 0.
 
 ## LeRobot touchpoints (lerobot 0.6.1, paths relative to site-packages/lerobot/)
+
+Added in the D-026 task: `utils/sample_weighting.py:125-132` (types rabc/uniform only), `:154-155` (RA-BC
+chunk_size from policy.config); `rewards/sarm/rabc.py:232-233` (batch weights normalized to sum to batch size),
+`:237-260` (delta = progress[t + chunk_size] − progress[t], last frame near the end); `scripts/lerobot_train.py:162`
+(loss = sum(w l) / sum(w)); `policies/act/configuration_act.py:85` (ACT chunk_size 100); `policies/factory.py:102`
+(`make_policy_config`); `utils/constants.py:69` (HF_LEROBOT_HOME read at import). Other sources: lab wiki
+github.com/thebaulab/onramp.wiki @ ec6b6665 (Filesystems-on-bau-clusters, NFS-Storage-Administration "Where Should
+I Put My Files?", Network-Architecture "Local Storage"); CUPID github.com/agiachris/cupid@2941eba9
+(`scripts/train/train_trak.sh:309-316`, `diffusion_policy/data_attribution/modelout_functions.py:111-136`); PyPI
+JSON API for checker project metadata.
 - **Subset training and D-013.** `DatasetConfig.episodes` exists (`configs/default.py:38`; passed to
   `LeRobotDataset` at `datasets/factory.py:101,114`), but metadata loads the FULL `meta/stats.json`
   (`datasets/dataset_metadata.py:219`) and lerobot-train feeds `dataset.meta.stats` to the processors
