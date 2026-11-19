@@ -261,7 +261,7 @@ def test_repo_protocol_d020_d022_fields():
     from robocurate.paths import repo_root
 
     p = C.load_protocol(repo_root() / "configs/protocol.yaml")
-    assert p.weight_permutation_seeds == list(range(3000, 3008))
+    assert p.weight_permutation_seeds == list(range(3000, 3012))
     assert p.max_curation_rollouts == 100
     assert isinstance(p.tie_break_salt, str) and len(p.tie_break_salt) == 32
     int(p.tie_break_salt, 16)

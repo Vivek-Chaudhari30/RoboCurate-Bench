@@ -7,10 +7,10 @@ n_eval_rollouts: 200           # per evaluated checkpoint (CLAUDE.md rule 2)
 checkpoint_rule: final         # final checkpoint at the fixed step count only (D-003)
 n_train_seeds: TBD             # set by power analysis on M0-measured sigma (D-005), floor 3 (D-026)
 train_seeds: TBD
-random_subset_seeds: [2000, 2001, 2002]   # placebo subsets (CLAUDE.md rule 1)
+random_subset_seeds: [2000, 2001, 2002, 2003, 2004, 2005, 2006, 2007, 2008, 2009, 2010, 2011]   # placebo subsets (CLAUDE.md rule 1; K <= 12)
 curation_seed_range: [500000, 599999]     # env seeds for cleaners that roll out policies; disjoint from eval (D-007)
 alpha: 0.05
 test: d026_balanced           # D-026 (supersedes D-002/D-016): exact balanced prediction t-test, Holm
 tie_break_salt: "46324cdb15ee2629d87e143bdb0d4fe1"   # D-021: selection ties broken by sha256(salt || episode content hash); generated once
-weight_permutation_seeds: [3000, 3001, 3002, 3003, 3004, 3005, 3006, 3007]   # D-020 weighting-track placebo
+weight_permutation_seeds: [3000, 3001, 3002, 3003, 3004, 3005, 3006, 3007, 3008, 3009, 3010, 3011]   # D-020/D-028 weighting-track placebo
 max_curation_rollouts: 100     # D-022 per (task, budget, replicate), curation seeds only

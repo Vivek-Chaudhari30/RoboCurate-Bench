@@ -27,6 +27,16 @@ reaches lerobot-train; (3) confirm the protocol.yaml edits made for D-026 (`test
 comments 6 -> 3); (4) `random_subset_seeds` lists 3 seeds: K >= 8 result runs need 8 (e.g. 2000–2007) and the M0
 grid's K = 4 needs 2000–2003; (5) CUPID: build the diffusion-policy toybed variant (outcome b) or leave disabled.
 
+## Non-GPU completion log (overnight 2, branch m1-core, CPU only, no MPS, no hokkaido; GPU-h 0)
+
+Start 2026-11-19T16:32Z (`caffeinate -dims -t 43200`). Env: rcb (py3.12, lerobot 0.6.1), `source scripts/env.sh`,
+`CUDA_VISIBLE_DEVICES=""`, `PYTORCH_ENABLE_MPS_FALLBACK=0`, device=cpu forced in every new code path.
+
+| UTC | item | what changed | tests | outcome |
+|---|---|---|---|---|
+| 2026-11-19T16:34Z | 1 decisions | D-027..D-032 appended verbatim to DECISIONS.md; protocol.yaml random_subset_seeds 2000–2011, weight_permutation_seeds 3000–3011 (approved); test:d026_balanced and floor-3 comments kept; two tests updated for the new lists | default 227 passed + 1 xfailed; ruff clean | done |
+<!-- ng-log -->
+
 ## Previous status (B-003/M0-launch task, STOPPED at Step 1, B-004; superseded by D-026)
 
 Branch `m1-core`. D-024 is recorded and implemented (result mode refuses n_p < 2). The hard FPR test, run on the

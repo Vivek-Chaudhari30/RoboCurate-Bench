@@ -30,7 +30,7 @@ def test_real_configs_load():
     from robocurate.data.mixture import Recipe
 
     p = load_protocol(REPO / "configs/protocol.yaml")
-    assert p.eval_seed_start == 100000 and p.n_eval_rollouts == 200 and p.random_subset_seeds == [2000, 2001, 2002]
+    assert p.eval_seed_start == 100000 and p.n_eval_rollouts == 200 and p.random_subset_seeds == list(range(2000, 2012))
     load_task(REPO / "configs/tasks/aloha_transfer_cube.yaml")
     load_grid(REPO / "configs/grids/task_a_v0.yaml")
     Recipe.load(REPO / "configs/mixtures/task_a_v0.yaml")
