@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import math
 import os
+import re
 import socket
 import subprocess
 import tempfile
@@ -205,11 +206,14 @@ def is_valid_file(path: str | Path) -> bool:
         return False
 
 
+RUN_FILE = re.compile(r"^[0-9a-f]{16}\.json$")  # <run_id>.json, written by runs/executor.py
+
+
 def load_dir(results_dir: str | Path) -> list[dict[str, Any]]:
-    """Load every valid results JSON under a directory (non-recursive into hidden files)."""
+    """Load every run record (<run_id>.json) in a directory. Other JSON files that report outputs put in the same
+    directory (leaderboard.json) are not run records and are skipped; every run record must validate."""
     out = []
     for p in sorted(Path(results_dir).glob("*.json")):
-        if p.name.startswith("."):
-            continue
-        out.append(load(p))
+        if RUN_FILE.match(p.name):
+            out.append(load(p))
     return out

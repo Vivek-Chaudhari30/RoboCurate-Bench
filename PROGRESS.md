@@ -145,7 +145,55 @@ Started 2026-11-19T06:19:12Z. Hokkaido read-only check at start: no tmux session
 | 2026-11-19T06:57Z | 5 entrants | (next) | default 195 passed + 1 xfailed (cupid sanity); entrant non-slow 19 passed; ruff clean | 10 entrants registered (lazy). Wrapped: lerobot_doctor, kinema, roboaudit, rda (adapters; tools NOT installed: install into shared env was denied by the permission system), robometer_filter, rabc (LeRobot reward/RA-BC). Reimplemented: demo_score, deminf, cupid (official code not pip-installable / no license). Original: rcb_score v1 (frozen, digest test). Toybed sanity with published defaults: robometer_filter/rcb_score/rabc (mock progress) pass; demo_score passes after replacing an unsourced epoch count (200) with the reference code's default 3000; deminf passes (slow: 222 s at the paper's 50k VAE steps) after fixing a KSG zero-radius NaN bug (regression test); cupid FAILS with defaults (xfail strict, reported). trajlens (pyarrow<25 vs 26.0.1) and retake (core dep upgrades + external LLM APIs) not adapted. |
 | 2026-11-19T07:00Z | 6 policy-rollout source | (next) | default 197 passed + 1 xfailed; integration 3 passed; ruff clean | data/mixture.py: PolicySource / collect_policy_episodes / write_policy_dataset: rolls out policies (seeds from the TOP of curation_seed_range downward, disjoint from cleaner rollouts which take seeds bottom-up; eval seeds refused) with replay-mode Perturbations executed in the env; LeRobot dataset (no video) + sidecar labels (source policy, checkpoint_step, success, perturbations; order shuffled per D-021). EpisodeLabel gained optional checkpoint_step/success/perturbations (schema-compatible). Tested end to end on the toybed with fake policies; not run on real checkpoints. |
 | 2026-11-19T07:03Z | 7 validate-defects | (next) | default 198 passed + 1 xfailed; ruff clean | robocurate validate-defects (data/validate.py; v2.1 + v3.0 parquet; actions/state/timestamps only; meta/** + data/** download, 0.5-45.6 MB each). Ran on 5 pinned SO-100/101 datasets (331 episodes): interior-pause episode rate 0.06-0.90 (median segment 0.6-1.2 s) vs our 11% at 0.5-1.5 s; 0 exact/near duplicates vs our 7%; jitter>0.10 in 0% of episodes except kmg0620 (15%); timestamp gaps in 22/150 episodes of one dataset; all single-task. docs/defect_validation.md + stats JSON. M0 mixture output not available (never built). Interior/boundary pause split added after the first run (both reported). |
+| 2026-11-19T07:09Z | 8 reproduce, site, CI | (next) | default (CI selection) 197 passed + 1 xfailed; ruff clean; CI YAML valid, its commands run locally | report switched to the D-019 primary test (Welch = labeled secondary), weighting-track analysis (Holm across weighting entrants, full data as reference), variance components + MDE, curation cost, cell ids. robocurate report --site (single self-contained HTML + leaderboard.json, FAKE watermark). robocurate reproduce <cell> (resolves git hash, configs+sha256, selection keys; prints commands; fake re-execution MATCH 6/6). .github/workflows/ci.yml (ubuntu-24.04, Python 3.12.16, exact lock with CPU torch wheels, ruff + default suite minus integration). Bugs fixed with regression tests: second report on the same dir loaded leaderboard.json as a run; in-process CLI calls recorded the caller's sys.argv as the command line. Outputs pasted above (m1-core end-to-end section). |
 <!-- m1-log-end -->
+
+## m1-core end-to-end (fake backend): prepare + run + report --site + reproduce, task_a_v0 incl. weighting track
+
+Commands (fake params = configs/fake/e2e_test.yaml with sleep_s 0):
+```
+robocurate prepare configs/grids/task_a_v0.yaml --backend fake --selections-dir $ROBOCURATE_SCRATCH/selections/m1-e2e-fake
+  rabc v1 [weighting] budget 1.0: progress + 8 permutation parquets; computed in 0.24s, GPU-h 0.000, rollouts 0, key a54930fab8b0
+  length_heuristic v1 [selection] budget 0.5: 25 episodes; computed in 0.00s, GPU-h 0.000, rollouts 0, key ad56eba12505
+robocurate run configs/grids/task_a_v0.yaml --backend fake --fake-params <fake> --results-dir $ROBOCURATE_SCRATCH/results/m1-e2e-fake --selections-dir ...
+  done=90 skipped_existing=0 skipped_locked=0 reclaimed_stale_locks=0
+robocurate report $ROBOCURATE_SCRATCH/results/m1-e2e-fake --n-boot 2000 --site $ROBOCURATE_SCRATCH/site-fake
+site: /Users/vivek/robocurate-scratch/site-fake/index.html
+*** FAKE RESULTS (synthetic backend) ***
+task aloha_transfer_cube budget 0.5 (selection):
+  full                         runs=6   mean=0.562  cell 5c055b8f910e
+  random                       runs=18  mean=0.489  cell e5267b2f86c9
+  oracle                       runs=6   mean=0.745  cell b8be368d553c
+  cleaner:length_heuristic     runs=6   mean=0.503  cell 186cc0bd36cb
+  cleaner:length_heuristic vs placebo [D-019]: diff=+0.014 SE=0.028 df=2 p_holm=0.662 not significant   (Welch secondary p_holm=0.643)
+  [ref] oracle vs placebo: diff=+0.256 p=0.0117 SIGNIFICANT
+  [ref] full vs placebo: diff=+0.073 p=0.12 not significant
+  s_sub=0.000 (truncated) s_seed=0.059 K=3 n_p=6 n_c=6  MDE (80% power): 0.158
+task aloha_transfer_cube full data (weighting):
+  full                         runs=6   mean=0.562  cell 5c055b8f910e
+  weighting:rabc               runs=6   mean=0.514  cell a03b0f077b04
+  weight_placebo:rabc          runs=48  mean=0.512  cell 167857559e44
+  weighting:rabc vs placebo [D-019]: diff=+0.002 SE=0.034 df=7 p_holm=0.958 not significant   (Welch secondary p_holm=0.938)
+  [ref] full vs placebo: diff=+0.050 p=0.143 not significant
+  s_sub=0.016 s_seed=0.069 K=8 n_p=6 n_c=6  MDE (80% power): 0.113
+wrote /Users/vivek/robocurate-scratch/results/m1-e2e-fake/report.md, /Users/vivek/robocurate-scratch/results/m1-e2e-fake/leaderboard.json
+robocurate reproduce a03b0f077b04 --results-dir ... --backend fake --selections-dir ...
+cell a03b0f077b04: task aloha_transfer_cube budget 1.0 condition {'kind': 'weighting', 'name': 'rabc', 'version': '1'} (6 runs, kind fake)
+git: 90fec7f70f (dirty)
+config /Users/vivek/Developer/CODES/RoboCurate-Bench/configs/protocol.yaml: sha256 412a70e4c962 ok
+config /Users/vivek/Developer/CODES/RoboCurate-Bench/configs/tasks/aloha_transfer_cube.yaml: sha256 37eef6888ecb ok
+config configs/grids/task_a_v0.yaml: sha256 40d7e2343354 ok
+config <scratchpad>/fake_nosleep.yaml: sha256 d620cc130ba5 ok
+selection cache keys: a54930fab8b0
+commands:
+  robocurate prepare configs/grids/task_a_v0.yaml --backend fake --selections-dir <SELECTIONS>
+  robocurate run configs/grids/task_a_v0.yaml --backend fake --fake-params <scratchpad>/fake_nosleep.yaml --results-dir /Users/vivek/robocurate-scratch/results/m1-e2e-fake --selections-dir /Users/vivek/robocurate-scratch/selections/m1-e2e-fake
+re-executed: MATCH 6/6
+```
+Known injected effects: oracle +0.25 (recovered: +0.256, p = 0.012, reference), length_heuristic 0 (not significant),
+rabc 0 (not significant vs its 8 permutation placebos). With D-019 the null full-vs-placebo difference (+0.073) is no
+longer significant (Welch gave p = 0.02 on the same data). The site is one self-contained HTML file (no scripts, no
+external requests) + leaderboard.json, FAKE-watermarked.
 
 ## M0 log (branch m0-calibration)
 

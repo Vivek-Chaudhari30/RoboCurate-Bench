@@ -96,7 +96,7 @@ def cmd_run(args) -> int:
             raise ConfigError("--backend fake requires --fake-params")
         params = load_fake_params(args.fake_params)
         plan = _make_plan(args.config, "fake", None if is_cal else params.train_seeds)
-        backend = FakeBackend(plan, params, command_line=[Path(sys.argv[0]).name, *sys.argv[1:]],
+        backend = FakeBackend(plan, params, command_line=args._command_line,
                               selections_dir=_selections_dir(args, plan, "fake"), replicate=args.replicate)
     else:
         if args.fake_params:
@@ -114,7 +114,7 @@ def cmd_run(args) -> int:
             from robocurate.paths import scratch_dir
 
             root = scratch_dir("datasets", create=False) / dataset
-        backend = LocalBackend(plan, mode, dataset, root, command_line=[Path(sys.argv[0]).name, *sys.argv[1:]],
+        backend = LocalBackend(plan, mode, dataset, root, command_line=args._command_line,
                                selections_dir=_selections_dir(args, plan, "local"), replicate=args.replicate)
 
     scratch = require_storage_env()
@@ -134,23 +134,32 @@ def cmd_report(args) -> int:
 
     a = write_report(args.results_dir, args.out, n_boot=args.n_boot)
     out = Path(args.out or args.results_dir)
+    if args.site:
+        from robocurate.report.site import write_site
+
+        print(f"site: {write_site(a, args.site)}")
     if a["fake"]:
         print("*** FAKE RESULTS (synthetic backend) ***")
-    for t in a["tasks"]:
-        for b in t["budgets"]:
-            print(f"task {t['task']} budget {b['budget']}:")
-            for c in b["conditions"]:
-                print(f"  {c['condition']:<28} runs={c['n_runs']:<3} mean={c['mean']:.3f}")
-            for c in b["cleaner_vs_placebo"]:
-                print(f"  {c['name']} vs placebo: diff={c['diff']:+.3f} p_holm={c['p_holm']:.3g} "
-                      f"{'SIGNIFICANT' if c['significant'] else 'not significant'}")
-            for c in b["reference_vs_placebo"]:
-                print(f"  [ref] {c['condition']} vs placebo: diff={c['diff']:+.3f} p={c['p']:.3g} "
-                      f"{'SIGNIFICANT' if c['significant'] else 'not significant'}")
-            if b["mde"]:
-                print(f"  MDE (80% power): {b['mde']['mde']:.3f}")
-            for i in b["issues"]:
-                print(f"  INVALID: {i}")
+    from robocurate.report.report import _panels
+
+    for task, title, b in _panels(a):
+        print(f"task {task} {title}:")
+        for c in b["conditions"]:
+            print(f"  {c['condition']:<28} runs={c['n_runs']:<3} mean={c['mean']:.3f}  cell {c['cell_id']}")
+        for c in b["cleaner_vs_placebo"]:
+            w = c.get("welch_secondary") or {}
+            print(f"  {c['name']} vs placebo [D-019]: diff={c['diff']:+.3f} SE={c['se']:.3f} df={c['df']:.0f} "
+                  f"p_holm={c['p_holm']:.3g} {'SIGNIFICANT' if c['significant'] else 'not significant'}"
+                  f"   (Welch secondary p_holm={w.get('p_holm', float('nan')):.3g})")
+        for c in b["reference_vs_placebo"]:
+            print(f"  [ref] {c['condition']} vs placebo: diff={c['diff']:+.3f} p={c['p']:.3g} "
+                  f"{'SIGNIFICANT' if c['significant'] else 'not significant'}")
+        if b["mde"]:
+            m = b["mde"]
+            print(f"  s_sub={m['s_sub']:.3f}{' (truncated)' if m['s_sub_truncated'] else ''} s_seed={m['s_seed']:.3f} "
+                  f"K={m['K']} n_p={m['n_p']} n_c={m['n_c']}  MDE (80% power): {m['mde']:.3f}")
+        for i in b["issues"]:
+            print(f"  INVALID: {i}")
     print(f"wrote {out / 'report.md'}, {out / 'leaderboard.json'}")
     return 0
 
@@ -206,6 +215,36 @@ def cmd_validate_defects(args) -> int:
     return 0
 
 
+def cmd_reproduce(args) -> int:
+    from robocurate.runs import reproduce as RP
+
+    info = RP.resolve(args.results_dir, args.cell_id)
+    head = results_git_head()
+    print(f"cell {info['cell_id']}: task {info['task']} budget {info['budget']} condition {info['condition']} "
+          f"({len(info['runs'])} runs, kind {info['kind']})")
+    print("git:", ", ".join(f"{h[:10]}{' (dirty)' if d else ''}" for h, d in info["git"]))
+    for p, st in info["config_checks"].items():
+        print(f"config {p}: sha256 {info['configs'][p][:12]} {st}")
+    if info["selection_keys"]:
+        print("selection cache keys:", ", ".join(k[:12] for k in info["selection_keys"]))
+    print("commands:")
+    for c in RP.commands(info, head):
+        print("  " + c)
+    if args.backend == "fake":
+        ok, diffs = RP.rerun_fake(info, args.selections_dir)
+        print(f"re-executed: MATCH {ok}/{len(info['runs'])}")
+        for d in diffs:
+            print("  DIFF " + d)
+        return 0 if not diffs else 1
+    return 0
+
+
+def results_git_head() -> str | None:
+    from robocurate.results import git_info
+
+    return git_info().hash
+
+
 def build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(prog="robocurate", description="RoboCurate-Bench")
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -236,7 +275,15 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("results_dir")
     p.add_argument("--out", help="output dir (default: results_dir)")
     p.add_argument("--n-boot", type=int, default=10_000)
+    p.add_argument("--site", help="also write a static leaderboard (index.html + leaderboard.json) here")
     p.set_defaults(fn=cmd_report)
+
+    p = sub.add_parser("reproduce", help="resolve a leaderboard cell; print its exact commands; rerun (fake)")
+    p.add_argument("cell_id")
+    p.add_argument("--results-dir", required=True)
+    p.add_argument("--backend", choices=["fake"], help="re-execute the cell's runs and compare (fake only)")
+    p.add_argument("--selections-dir", help="prepare cache used by the original runs (fake re-execution)")
+    p.set_defaults(fn=cmd_reproduce)
 
     p = sub.add_parser("validate-defects", help="defect stats from actions/state/timestamps (no video download)")
     p.add_argument("datasets", nargs="+", help="local dataset dirs or repo_id@revision")
@@ -255,13 +302,16 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     os.environ.setdefault("PYTHONNOUSERSITE", "1")
     args = build_parser().parse_args(argv)
+    # the exact command recorded in results (regression: in-process calls recorded the caller's sys.argv)
+    args._command_line = ["robocurate", *(sys.argv[1:] if argv is None else list(argv))]
     from robocurate.curation.prepare import PrepareError
     from robocurate.paths import StorageError
     from robocurate.runs.backends.local import LocalBackendRefused
+    from robocurate.runs.reproduce import ReproduceError
 
     try:
         return args.fn(args)
-    except (ConfigError, StorageError, LocalBackendRefused, PrepareError) as e:
+    except (ConfigError, StorageError, LocalBackendRefused, PrepareError, ReproduceError) as e:
         print(f"error: {e}", file=sys.stderr)
         return 2
 

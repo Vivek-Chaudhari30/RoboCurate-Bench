@@ -160,3 +160,35 @@ def test_submit_cli(tmp_path, capsys):
     assert json.loads((tmp_path / "sel.json").read_text())["cleaner"] == "smoothness_fixture"
     assert cli.main(["submit", str(FIX / "broken_cleaners/label_import.py"), "--out", str(tmp_path / "b.json")]) == 1
     assert not (tmp_path / "b.json").exists()
+
+
+def test_report_twice_and_site(tmp_path, scratch_env, capsys):
+    """Regression: a second `report` on the same dir loaded leaderboard.json as a run record and crashed."""
+    out = _fake_e2e(tmp_path, scratch_env)
+    assert cli.main(["report", str(out), "--n-boot", "200"]) == 0
+    site = tmp_path / "site"
+    assert cli.main(["report", str(out), "--n-boot", "200", "--site", str(site)]) == 0
+    page = (site / "index.html").read_text()
+    assert page.startswith("<!doctype html>") and "FAKE RESULTS" in page and "<title>FAKE" in page
+    assert "http://" not in page and "https://" not in page and "<script" not in page  # self-contained, no requests
+    lb = json.loads((site / "leaderboard.json").read_text())
+    assert lb["fake"] and lb["tasks"][0]["budgets"][0]["mde"]["df"] == 2  # K = 3 -> df = K - 1 (D-019)
+    for c in lb["tasks"][0]["budgets"][0]["conditions"]:
+        assert c["cell_id"] in page
+
+
+def test_reproduce_fake_cell(tmp_path, scratch_env, capsys):
+    out = _fake_e2e(tmp_path, scratch_env)
+    assert cli.main(["report", str(out), "--n-boot", "100"]) == 0
+    lb = json.loads((out / "leaderboard.json").read_text())
+    cells = {c["condition"]: c["cell_id"] for c in lb["tasks"][0]["budgets"][0]["conditions"]}
+    capsys.readouterr()
+    for cond in ("cleaner:length_heuristic", "random"):
+        rc = cli.main(["reproduce", cells[cond], "--results-dir", str(out), "--backend", "fake",
+                       "--selections-dir", str(tmp_path / "sel")])
+        o = capsys.readouterr().out
+        assert rc == 0, o
+        n = 6 if cond.startswith("cleaner") else 18
+        assert f"MATCH {n}/{n}" in o and "robocurate run" in o and "robocurate prepare" in o
+        assert "  pytest " not in o  # regression: in-process calls recorded the caller's sys.argv
+    assert cli.main(["reproduce", "000000000000", "--results-dir", str(out)]) == 2
