@@ -42,6 +42,7 @@ Start 2026-11-19T16:32Z (`caffeinate -dims -t 43200`). Env: rcb (py3.12, lerobot
 | 2026-11-19T18:39Z | 5 Task A mixture | configs/mixtures/task_a_v1.yaml per D-031 (rates from docs/defect_validation.md); recipe rate + deferred_sources schema; no scripted transfer-cube policy installed -> replay-mode generation path implemented + toybed-tested, real generation deferred; jitter sigma [0.173, 0.726] and grasp onset 135 measured from scripted actions | tests/test_mixture_v1.py 9 passed | done (CPU build + validate-defects pending: HF Hub TLS failure, see below) |
 | 2026-11-19T18:47Z | 6 launch kit | m0_pipeline.sh + launch/m0.py (stages a-f), gpu_phase_rollouts.sh + launch/rollouts.py, prepare_gpu_scores.sh (+ prepare --only), tests/test_gpu.py (gpu marker), task_a_v1 grid, runbook_gpu.md; calibration batch/eval-batch/num_workers fields | test_launch 13 passed; non-integration suite 253 passed + 1 skipped + 1 xfailed; ruff clean | dry run PASS both tasks (fake, temp scratch, no commits); output in the Launch kit section; nothing launched |
 | 2026-11-19T18:48Z | 7 pre-registration | docs/preregistration.md (question, hypotheses, D-026 primary test + t-based 95% CI, design rules, references, tasks/mixtures, entrants with versions/status, outcome labels, M0 rule for n/K/R/S with MDE target 12 pp, empty deviations log); report computes ci95/mde/label per entrant (stats.outcome_label, t_ci95) | test_stats + test_cli_report 57 passed; ruff clean | done; NOT tagged (Vivek tags prereg-v1) |
+| 2026-11-19T18:48Z | 8 references | docs/references.bib (14 verified entries) + README credits; CuraEval verified (arXiv 2610.38221, CoRL 2026 workshop); DataMIL code verified; QoQ code TODO unverified | n/a (docs) | done |
 <!-- ng-log -->
 
 ## Previous status (B-003/M0-launch task, STOPPED at Step 1, B-004; superseded by D-026)
@@ -373,6 +374,33 @@ d = 4000, lambda = 0, m = 100).
   (tests `test_disabled_entrant_refused_in_grids_and_excluded_from_report`). It is not listed under CUPID's name.
 - *Next step if wanted.* (b): a toy diffusion policy (DDPM loss, the reference "square" output, Q = 1) on the
   toybed, then require the sanity pass there.
+
+## References (overnight 2, item 8)
+
+Every citation was checked on 2026-11-19 against:
+- the arXiv API (export.arxiv.org: title, full author list, version, comments);
+- the venue page (roboticsproceedings.org, iclr.cc);
+- Crossref (DOI);
+- PyPI JSON (checkers);
+- the GitHub API (code repos and licenses).
+
+`docs/references.bib` (14 entries) and the README credits were written from that data only.
+
+| item | verified |
+|---|---|
+| CuraEval | **exists**: arXiv 2610.38221v1, "CuraEval: Evaluating Demonstration Curation on Mixed-Skill Robot Data", Jiuyi Xu, Meida Chen, Yang Ye, Yangming Shi, submitted 2026-10-28, CoRL 2026 Workshop "Oops, I Erred" (arXiv comment); code github.com/jiuyixu25/CuraEval (MIT). The earlier README note "no paper found" was wrong and was replaced. Nothing in the repo attributed claims to it. The README now says, in our words, what its abstract says: it compares curation with size-matched random subsets and full data on mixed-skill robomimic (Diffusion Policy, BC-RNN), and apparent gains shrink when checkpoint reporting, rollout count and eval seeds change together. |
+| CUPID | arXiv 2506.19121v2, 8 authors (Agia ... Bohg), CoRL 2025 (arXiv comment); code agiachris/cupid (MIT) |
+| DemInf | arXiv 2502.08623v3, 10 authors (Hejna ... Sadigh), RSS 2025 (arXiv comment); code jhejna/demonstration-information (MIT) |
+| QoQ | arXiv 2603.09056v1, 7 authors (Lee ... Lee), "Accepted to ICRA 2026" (arXiv comment); **official code: TODO unverified** (none found) |
+| Demo-SCORE | arXiv 2503.03707v2, Chen, Lessing, Liu, Finn; RSS XXI 2025, DOI 10.15607/RSS.2025.XXI.071 (proceedings page); code alessing/demo-score (no license) |
+| DataMIL | arXiv 2505.09603v2, 6 authors (Dass ... Martín-Martín); ICLR 2026 (iclr.cc poster 10011019); code UT-Austin-RobIn/datamil (MIT) |
+| LeRobot | arXiv 2602.22818v1, 17 authors (Cadene et al.), ICLR 2026 (iclr.cc poster 10010831) |
+| SARM (RA-BC) | arXiv 2509.25358v4, 6 authors (Chen ... Wu); no venue listed |
+| Robometer | arXiv 2603.02115v2, 17 authors (Liang et al.); no venue listed |
+| KSG | Kraskov, Stögbauer, Grassberger, Phys. Rev. E 69, 066138 (2004), DOI 10.1103/PhysRevE.69.066138 (Crossref) |
+| checkers | lerobot-doctor 0.2.0 Apache-2.0; kinema 0.1.0 Apache-2.0 (PyPI latest 0.1.1); roboaudit 0.3.1 MIT; robot-data-audit 0.12.5 MIT (= liesliy/rda @47c69459) |
+
+Unverified, so kept out of the bib: QoQ official code.
 
 ## Launch kit (overnight 2, item 6) — built and dry-run on CPU; NOT launched, no ssh
 
