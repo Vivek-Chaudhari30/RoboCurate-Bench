@@ -1,0 +1,50 @@
+# Task A mixture recipe v1 (D-031). Frozen with eval-v1; may change only before any entrant result exists.
+# Rates are tied to docs/defect_validation.md (5 public SO-100/101 datasets, defect_validation_stats.json).
+# Total planned: 200 episodes = 40 scripted (dataset) + 10 scripted replay-mode (GPU phase) + 50 human
+#                + 100 policy rollouts (GPU phase).
+# This file builds the CPU part (sources:); deferred_sources are declared here so the recipe hash covers them,
+# and are generated in the GPU phase (docs/runbook_gpu.md), then added as sources and the mixture rebuilt
+# (post-hoc defect rates then apply to all 200 episodes).
+name: task_a_v1
+repo_id: robocurate/task_a_v1
+seed: 31                                   # recipe seed: episode order shuffled by it (D-021)
+sources:
+  - {dataset: lerobot/aloha_sim_transfer_cube_scripted, source: scripted, n_episodes: 40,
+     revision: c5467ba9059e4c65f27775ced212076980a173fb}
+  - {dataset: lerobot/aloha_sim_transfer_cube_human, source: human, n_episodes: 50,
+     revision: 6a43d500f101255823a9d2b9dc244eeb01a2cd31}
+defects:
+  # Interior pause episode rate: per-dataset 0.06 / 0.50 / 0.90 / 0.30 / 0.83 -> median 0.50
+  # (docs/defect_validation.md Results, "pause rate (interior)").
+  # Pause length: per-dataset median interior segment 0.62 / 0.92 / 0.72 / 1.20 / 0.87 s -> range of medians
+  # 0.62-1.20 s = 31-60 frames at 50 fps (ALOHA sim fps).
+  pause: {rate: 0.50, k_min: 31, k_max: 60}
+  # Duplicates: 0 exact and 0 near-duplicate pairs in all 5 datasets (331 episodes) -> median rate 0.
+  duplicate: {rate: 0.0}
+  # wrong_task: excluded (D-031): ACT ignores the task string.
+deferred_sources:
+  - name: scripted_replay
+    source: scripted_replay
+    generated_in: gpu_phase                # needs a scripted transfer-cube policy; none ships in gym-aloha 0.1.5
+                                           # or lerobot 0.6.1 (PROGRESS.md item 5), plus MuJoCo rendering
+    n_episodes: 10                         # 20% of the 50 scripted episodes (D-031)
+    perturbations:
+      # Jitter: whole-episode Gaussian action noise. Community jitter (hf_power_share = share of action power
+      # above fps/4): only kmg0620/so101_bomb_pick_place_v1 has episodes above the 0.10 flag (14.7%), p95 0.406.
+      # sigma range = the noise that puts the MEDIAN hf_power_share of the 50 scripted episodes at 0.10 (0.173)
+      # and at 0.406 (0.726), computed on their recorded actions (PROGRESS.md item 5). Per-episode sigma drawn
+      # uniformly in that range from the episode's curation seed.
+      - {type: jitter, n_episodes: 5, sigma_range: [0.173, 0.726], onset: 0, duration: 400}
+      # Failed grasp: force the right gripper (action dim 13, right_gripper) open (1.0, its max in the scripted
+      # data) from frame 135 -- where the scripted right gripper starts closing on the cube in all 50 episodes --
+      # to the end (400 frames). No community statistic exists for failed grasps (not measured).
+      - {type: gripper_drop, n_episodes: 5, onset: 135, duration: 265, gripper_dims: [13], open_value: 1.0}
+  - name: policy_rollouts
+    source: policy
+    generated_in: gpu_phase                # full-data ACT checkpoints of the M0 seed-1000 run, curation seeds only
+    n_episodes: 100
+    checkpoints:                           # 25 each; successes and failures both kept (D-031)
+      - {train_fraction: 0.10, n_episodes: 25}
+      - {train_fraction: 0.30, n_episodes: 25}
+      - {train_fraction: 0.60, n_episodes: 25}
+      - {train_fraction: 1.00, n_episodes: 25}

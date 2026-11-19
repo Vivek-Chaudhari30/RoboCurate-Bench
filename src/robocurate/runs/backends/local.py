@@ -148,6 +148,16 @@ class LocalBackend:
             return int(p.calibration_seed_start)
         return int(p.eval_seed_start)
 
+    def num_workers(self) -> int | None:
+        """D-027: DataLoader workers, the only allowed I/O mitigation (speed, not results). The calibration config
+        wins for calibration plans; otherwise the task config; None = LeRobot's default."""
+        for cfg in ((self.plan.grid,) if self.plan.kind == "calibration" else ()) + (self.plan.task,):
+            raw = getattr(cfg, "raw", None)
+            v = raw("num_workers") if raw else None
+            if v is not None and not is_tbd(v):
+                return int(v)
+        return None
+
     def n_final_rollouts(self) -> int:
         if self.plan.kind == "calibration":
             return int(self.plan.grid.raw("n_final_rollouts"))
@@ -186,7 +196,8 @@ class LocalBackend:
             save_freq = int(sf)
         train_cmd = build_train_cmd(self.plan.task, spec, sub, run_dir / "train", save_freq=save_freq,
                                     steps=self.steps, device=self.device,
-                                    sample_weighting_progress=self.progress_parquet(spec))
+                                    sample_weighting_progress=self.progress_parquet(spec),
+                                    num_workers=self.num_workers())
         peak_train = self._run(train_cmd, run_dir / "train.log")
         ckpt = final_checkpoint(run_dir / "train", self.steps)
         n = self.n_final_rollouts()

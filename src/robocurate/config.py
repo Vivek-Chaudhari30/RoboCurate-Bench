@@ -273,6 +273,7 @@ class TaskConfig(_Guarded):
     batch_size: Any = 8
     eval_batch_size: Any = 50
     save_freq: Any = None
+    num_workers: Any = None  # D-027: DataLoader workers (speed only); None = LeRobot default (configs/train.py:101)
     notes: str = ""
 
 
@@ -357,10 +358,20 @@ class CalibrationConfig(_Guarded):
     n_final_rollouts: int
     n_intermediate_rollouts: int
     intermediate_save_freq: Any
+    random_subsets: dict | None = None  # {budget, n_subsets, train_seeds}: K-subset cells for s_sub (M0 design)
+    num_workers: Any = None  # D-027: DataLoader workers (speed only); set by the launch kit's I/O check
 
     def __post_init__(self) -> None:
         if object.__getattribute__(self, "n_final_rollouts") < 200:
             raise ConfigError("n_final_rollouts must be >= 200 (CLAUDE.md rule 2)")
+        rs = object.__getattribute__(self, "random_subsets")
+        if rs is not None:
+            if set(rs) != {"budget", "n_subsets", "train_seeds"}:
+                raise ConfigError("random_subsets needs exactly budget, n_subsets, train_seeds")
+            if not 0 < float(rs["budget"]) < 1 or int(rs["n_subsets"]) < 2 or len(rs["train_seeds"]) < 2:
+                raise ConfigError("random_subsets: budget in (0, 1), n_subsets >= 2, >= 2 train seeds (s_seed)")
+            if len(set(rs["train_seeds"])) != len(rs["train_seeds"]):
+                raise ConfigError("random_subsets.train_seeds must be distinct")
 
 
 def load_calibration(path: str | Path, mode: Mode = "plan") -> CalibrationConfig:

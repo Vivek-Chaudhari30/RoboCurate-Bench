@@ -110,24 +110,37 @@ To submit your own cleaner, see [docs/submit.md](docs/submit.md).
 
 ## Credits
 
-- **LeRobot** (Hugging Face): datasets, ACT, training/eval, Robometer and RA-BC. https://github.com/huggingface/lerobot
+Verified on 2026-11-19 against the arXiv API, the venue pages, Crossref or PyPI. BibTeX:
+[docs/references.bib](docs/references.bib).
+
+- **LeRobot**: Cadene et al., "LeRobot: An Open-Source Library for End-to-End Robot Learning", ICLR 2026, arXiv
+  2602.22818. Pinned at 0.6.1; it provides the datasets, ACT, Diffusion Policy, training/eval, Robometer and RA-BC.
+  https://github.com/huggingface/lerobot
 - **CUPID**: Agia et al., "CUPID: Curating Data your Robot Loves with Influence Functions", CoRL 2025, arXiv
   2506.19121. Reference code: github.com/agiachris/cupid (MIT).
 - **DemInf**: Hejna et al., "Robot Data Curation with Mutual Information Estimators", RSS 2025, arXiv 2502.08623.
   Reference code: github.com/jhejna/demonstration-information (MIT).
-- **Demo-SCORE**: Chen, Lessing et al., "Curating Demonstrations using Online Experience", RSS 2025, arXiv
-  2503.03707. Reference code: github.com/alessing/demo-score (no license file; not redistributed).
+- **Demo-SCORE**: Chen, Lessing, Liu, Finn, "Curating Demonstrations using Online Experience", RSS XXI (2025),
+  DOI 10.15607/RSS.2025.XXI.071, arXiv 2503.03707. Reference code: github.com/alessing/demo-score (no license
+  file; not redistributed).
 - **QoQ**: Lee et al., "Quality over Quantity: Demonstration Curation via Influence Functions for Data-Centric Robot
-  Learning", ICRA 2026, arXiv 2603.09056. TODO: official code link (none found).
-- **DataMIL**: Dass et al., "DataMIL: Selecting Data for Robot Imitation Learning with Datamodels", ICLR 2026, arXiv
-  2505.09603. Code: github.com/UT-Austin-RobIn/datamil (MIT).
-- **CuraEval**: VERIFY CITATION. TODO: no paper or repository by this name was found (2026-11-19).
-- **RA-BC / SARM**: arXiv 2509.25358 (Eq. 8-9 as implemented in lerobot `rewards/sarm/rabc.py`). TODO: full
-  author list.
-- **Robometer**: reward model `lerobot/Robometer-4B` via lerobot `rewards/robometer`. TODO: paper citation.
-- **Checkers**:
+  Learning", ICRA 2026 (accepted, per arXiv), arXiv 2603.09056. Not implemented. TODO: unverified official code
+  link (none found).
+- **DataMIL**: Dass et al., "DataMIL: Selecting Data for Robot Imitation Learning with Datamodels", ICLR 2026,
+  arXiv 2505.09603. Not implemented. Code: github.com/UT-Austin-RobIn/datamil (MIT).
+- **CuraEval**: Xu, Chen, Ye, Shi, "CuraEval: Evaluating Demonstration Curation on Mixed-Skill Robot Data", CoRL
+  2026 Workshop "Oops, I Erred", arXiv 2610.38221. Code: github.com/jiuyixu25/CuraEval. Closest related work:
+  it compares curation methods with size-matched random subsets and full-data training on mixed-skill robomimic
+  data with Diffusion Policy and BC-RNN, and reports that apparent gains shrink when checkpoint reporting, rollout
+  count and evaluation seeds change together.
+- **RA-BC / SARM**: Chen et al., "SARM: Stage-Aware Reward Modeling for Long Horizon Robot Manipulation", arXiv
+  2509.25358 (Eq. 8-9 as implemented in lerobot `rewards/sarm/rabc.py`).
+- **Robometer**: Liang et al., "Robometer: Scaling General-Purpose Robotic Reward Models via Trajectory
+  Comparisons", arXiv 2603.02115. Used through lerobot `rewards/robometer` (`lerobot/Robometer-4B`).
+- **Checkers** (versions and licenses from PyPI):
   - lerobot-doctor 0.2.0 (Apache-2.0).
-  - kinema 0.1.0 (Apache-2.0).
+  - kinema 0.1.0 (Apache-2.0; 0.1.1 exists).
   - roboaudit 0.3.1 (MIT).
-  - Robot Data Audit (RDA), github.com/liesliy/rda (MIT).
-- **KSG estimator**: Kraskov, Stögbauer, Grassberger, Phys. Rev. E 69, 066138 (2004).
+  - Robot Data Audit (RDA), github.com/liesliy/rda @47c69459 = PyPI robot-data-audit 0.12.5 (MIT).
+- **KSG estimator**: Kraskov, Stögbauer, Grassberger, "Estimating mutual information", Phys. Rev. E 69, 066138
+  (2004), DOI 10.1103/PhysRevE.69.066138.

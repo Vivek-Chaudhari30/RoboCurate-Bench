@@ -38,6 +38,8 @@ Start 2026-11-19T16:32Z (`caffeinate -dims -t 43200`). Env: rcb (py3.12, lerobot
 | 2026-11-19T16:37Z | 2 D-028 | weights.py: permute_progress_curves replaces permute_weight_curves/write_weights_parquet (no rescale); prepare writes perm{i}_progress.parquet (RA-BC schema, rabc.py:101-126) and records placebo_progress_parquets, weighting_placebo D-028; local backend placebo refusal removed (permutation subset_index -> its parquet); CLI print updated. Tests: shapes, identity exact, seeded, resample/no-rescale, golden rabc vs placebo cmd differ only in progress path, LeRobot make_sample_weighter/RABCWeights (utils/sample_weighting.py:103-185, rabc.py:175-233) accept placebo files with finite weights. B-005 and B-006 closed. | default 227 passed + 1 xfailed; test_curation 23 passed; ruff clean | done |
 | 2026-11-19T16:51Z | 3 CUPID diffusion | tests/toybed/diffusion.py (DDPM toy policy, LeRobot Diffusion defaults); cupid.py native diffusion path (official square output, 64 timesteps, d 4000, lambda 0, net/sum_of_sum; agiachris/cupid@2941eba); rollouts reset chunked policies; tests (autograd parity, AUROC helper, premise, strict-xfail sanity); README limitation per D-029 | new tests 3 passed + 1 xfailed (slow incl.); ruff clean | FAIL: AUROC 0.52 < 0.8 (3 seeds 0.51-0.52); premise holds (0.07 vs 1.00); CUPID stays disabled everywhere; damping diagnostics recorded |
 | 2026-11-19T16:55Z | 4 (bug fix) | runs/backends/local.py: calibration runs evaluated on protocol EVAL seeds (eval_seed_start) — violates D-017 / CLAUDE.md rule 10; never executed (M0 not launched). Now eval_seed_start() returns calibration_seed_start for calibration plans (final and intermediate evals), n_final_rollouts from the calibration config, seeds record has seed_block. Regression test test_local_backend_eval_seed_block (mocked run()) | default 231 passed + 1 xfailed; ruff clean | fixed |
+| 2026-11-19T18:39Z | 4 Task B | D-030 checks PASS on CPU (scratch venv with lerobot's pusht extra + diffusers; rcb + lock untouched); configs task/mixture/grid/M0 for pusht_diffusion; calibration random_subsets + per-unit seeds (Task A M0 config gained K=4x2); num_workers plumbing (D-027); tests/test_task_b.py | test_task_b 6 passed + 1 skipped (rcb), env test passes in venv; default (non-integration) green; ruff clean | done; Task B = PushT + Diffusion |
+| 2026-11-19T18:39Z | 5 Task A mixture | configs/mixtures/task_a_v1.yaml per D-031 (rates from docs/defect_validation.md); recipe rate + deferred_sources schema; no scripted transfer-cube policy installed -> replay-mode generation path implemented + toybed-tested, real generation deferred; jitter sigma [0.173, 0.726] and grasp onset 135 measured from scripted actions | tests/test_mixture_v1.py 9 passed | done (CPU build + validate-defects pending: HF Hub TLS failure, see below) |
 <!-- ng-log -->
 
 ## Previous status (B-003/M0-launch task, STOPPED at Step 1, B-004; superseded by D-026)
@@ -369,6 +371,65 @@ d = 4000, lambda = 0, m = 100).
   (tests `test_disabled_entrant_refused_in_grids_and_excluded_from_report`). It is not listed under CUPID's name.
 - *Next step if wanted.* (b): a toy diffusion policy (DDPM loss, the reference "square" output, Q = 1) on the
   toybed, then require the sanity pass there.
+
+## Task B setup (overnight 2, item 4, D-030) — all three checks PASS: Task B = PushT + Diffusion Policy
+
+CPU only (CUDA_VISIBLE_DEVICES="", MPS fallback off, `--policy.device=cpu`). The checks need lerobot's own `pusht`
+extra (gym-pusht >=0.1.5,<0.2.0, pymunk >=6.6,<7; METADATA:260-262) and, for Diffusion Policy, diffusers
+>=0.38,<0.40 (METADATA:92), none of them installed or locked. To keep the rcb env and `requirements.lock` unchanged,
+they were installed into a throwaway venv layered on rcb (`$ROBOCURATE_SCRATCH/venvs/taskb`,
+`--system-site-packages`): gym-pusht 0.1.8, pymunk 6.11.1, diffusers 0.39.0 (+ pygame 2.6.1, shapely 2.2.0,
+opencv-python 4.14.0.94, cffi, pycparser, regex, lazy-importer, importlib_metadata), after a dry run. rcb still has
+no gym_pusht. Adding these to the lock is a decision for Vivek (needed on hokkaido for the Task B GPU phase).
+
+| check | how | result |
+|---|---|---|
+| lerobot/pusht loads without conversion | `LeRobotDataset("lerobot/pusht", revision=7628202a…)` (datasets/lerobot_dataset.py:47-61), item 0 decoded on CPU | **pass**: v3.0, 206 episodes, 25650 frames, fps 10; image 3x96x96, state 2, action 2 (7.7 MB download) |
+| CPU reset/render | `make_env(make_env_config("pusht"), n_envs=1)` (envs/factory.py:26-34, 58-64; PushtEnv envs/configs.py:191-215), reset(seed=[300000]), render(), one step | **pass**: SyncVectorEnv; obs agent_pos (1, 2), pixels (1, 96, 96, 3); render (384, 384, 3) |
+| runnable through lerobot-eval | our `build_train_cmd` (policy diffusion, 2 steps, batch 2, cpu) -> `lerobot.scripts.lerobot_train`; our `build_eval_cmd` (pusht, PushT-v0, 1 episode, seed 300000 = calibration block, cpu, + `--env.episode_length=16`) -> `lerobot.scripts.lerobot_eval`; `parse_eval_info` | **pass**: train 9.4 s, eval 8.2 s, per-episode success [False] (a 2-step policy; only runnability is checked) |
+
+Configs: `configs/tasks/pusht_diffusion.yaml` (steps / per_run_gpu_h / batch sizes TBD),
+`configs/mixtures/pusht_diffusion_v1.yaml` (proposal: all 206 human demos + 100 policy rollouts, GPU phase; pauses
+at rate 0.50, 6-12 frames; duplicates rate 0), `configs/grids/pusht_diffusion_v0.yaml` (budget 0.5, K = 8, full /
+random / oracle / 9 enabled selection entrants incl. the length baseline; n = protocol train_seeds TBD),
+`configs/calibration/pusht_diffusion_m0.yaml` (full x 3 seeds + K = 4 x 2 seeds, calibration seeds).
+**No weighting track for Task B:** RA-BC needs `policy.config.chunk_size` (utils/sample_weighting.py:150-158);
+DiffusionConfig has horizon / n_action_steps instead.
+
+Infrastructure added for the M0 design (both tasks): `CalibrationConfig.random_subsets` {budget, n_subsets,
+train_seeds} and per-unit train seeds in the planner (`Unit.train_seeds`), so M0 = full x [1000, 1001, 1002] +
+4 subsets (seeds 2000-2003) x [1000, 1001] = 11 runs per task; Task A's M0 config gained the same block (it had only
+the full-data cells). `num_workers` (D-027) on task and calibration configs -> `--num_workers` (configs/train.py:101).
+
+Tests (`tests/test_task_b.py`): configs load; grid lists every enabled selection entrant; diffusion train + PushT
+eval flags exist in the installed dataclasses; RA-BC refuses diffusion; PushT metadata loads (integration); CPU
+env reset/render (skipped without gym-pusht; passes in the venv); fake end-to-end prepare -> run -> report on the
+Task B grid (slow, 4 min: 57 runs). Result: 6 passed + 1 skipped (rcb); env test 2 passed (venv).
+
+## Task A mixture recipe v1 (overnight 2, item 5, D-031)
+
+- `configs/mixtures/task_a_v1.yaml`: 40 scripted + 50 human (CPU-buildable) + deferred 10 scripted replay-mode
+  (5 jitter, 5 failed grasp) + 100 policy rollouts (4 checkpoints x 25) = 200. Pauses at rate 0.50 (median interior
+  rate of 0.06/0.50/0.90/0.30/0.83), 31-60 frames (range of per-dataset median interior segment 0.62-1.20 s at 50 fps);
+  duplicates rate 0 (0 exact / 0 near in 331 episodes); no wrong_task (ACT ignores it); recipe seed 31 shuffles order.
+- Recipe schema: `defects.<kind>.rate` (exactly one of n_episodes / rate; round half up), `deferred_sources`
+  (validated: kind policy | scripted_replay, generated_in gpu_phase, parts sum to n_episodes, known perturbations).
+- **Scripted transfer-cube policy: none installed.** gym-aloha 0.1.5 ships only the end-effector (mocap) task
+  (`gym_aloha/tasks/sim_end_effector.py:139 TransferCubeEndEffectorTask`; `:123` comment "used in scripted policy")
+  and no policy; lerobot 0.6.1 has none (grep PickAndTransferPolicy/scripted_policy: no hits). So the replay-mode
+  path was implemented and tested on the toybed, and the real generation is deferred to the GPU phase:
+  `replay_policy_sources` (one PolicySource per episode; jitter sigma drawn from the episode's curation seed),
+  `deferred_seed_offset` (the two deferred sources never share curation seeds), `collect_policy_episodes(...,
+  seed_offset)`, `write_policy_dataset(..., source_label)`. Test `test_replay_mode_generation_on_toybed`:
+  observations follow executed actions, gripper dim forced, labels (source scripted, defects, tier bad, success)
+  and LeRobot-loadable.
+- **Intensities from data** (scripted dataset @c5467ba9 actions, parquet only, CPU): whole-episode Gaussian jitter
+  with sigma 0.173 puts the median hf_power_share of the 50 scripted episodes at 0.10 (community flag) and sigma
+  0.726 at 0.406 (p95 of kmg0620, the only community dataset with jitter); per-episode sigma uniform in
+  [0.173, 0.726]. Clean scripted share p50 1.05e-3. These sigmas are large in joint-angle terms (rad); the HF share
+  is a relative measure (noise power vs motion power), so matching community levels on smooth scripted motion
+  needs strong noise. Failed grasp: right gripper (dim 13) forced to 1.0 (open, its max) from frame 135 (where the
+  scripted right gripper starts closing in all 50 episodes; it crosses 0.5 at frame 152) to the end.
 
 ## CUPID diffusion toybed (overnight 2, item 3, D-029) — FAIL: stays disabled
 

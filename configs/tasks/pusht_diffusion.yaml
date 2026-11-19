@@ -1,0 +1,17 @@
+# Task B (D-030): PushT + Diffusion Policy. Conditional on the three D-030 checks (PROGRESS.md, "Task B setup").
+name: pusht_diffusion
+env_type: pusht                       # lerobot envs/configs.py:191 (PushtEnv; obs_type pixels_agent_pos, episode_length 300)
+env_task: PushT-v0                    # PushtEnv.task default (envs/configs.py:193); gym id gym_pusht/PushT-v0
+policy_type: diffusion                # policies/diffusion/configuration_diffusion.py (DiffusionConfig)
+source_datasets:                      # lerobot/pusht @7628202a (v3.0, 206 eps, fps 10), human teleop
+  - lerobot/pusht
+train_dataset: robocurate/task_b_v1   # built by configs/mixtures/pusht_diffusion_v1.yaml (local only, never pushed)
+steps: TBD                            # fixed gradient steps for every condition (D-004); from M0 Task B
+per_run_gpu_h: TBD                    # train + eval, measured in M0 Task B
+batch_size: TBD                       # LeRobot default is 8 (configs/train.py:102). Decide at M0 (stage d / runbook).
+eval_batch_size: TBD                  # parallel envs in lerobot-eval; does not change env seeds (eval/lerobot_eval.py)
+save_freq: null                       # null -> only the final checkpoint is saved for result runs
+notes: >-
+  Weighting track not available: LeRobot 0.6.1 RA-BC needs policy.config.chunk_size
+  (utils/sample_weighting.py:150-158) and DiffusionConfig has none (horizon / n_action_steps instead).
+  Requires the lerobot[pusht] and diffusers extras (METADATA:92, 260-262), not in requirements.lock.

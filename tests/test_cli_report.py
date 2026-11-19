@@ -22,7 +22,7 @@ def test_plan_real_configs_tbd(capsys):
 def test_plan_calibration_config(capsys):
     assert cli.main(["plan", str(REPO / "configs/calibration/m0_act_transfer_cube_human.yaml")]) == 0
     out = capsys.readouterr().out
-    assert "calibration:" in out and "runs: 1 cells x 3 seeds = 3" in out and "steps per run: TBD" in out
+    assert "calibration:" in out and "runs: 5 cells, per-cell seeds = 11" in out and "steps per run: TBD" in out
 
 
 def test_real_configs_load():

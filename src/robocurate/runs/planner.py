@@ -28,6 +28,7 @@ class Unit:
     budget: float
     subset_index: int | None
     subset_seed: int | None
+    train_seeds: tuple[int, ...] | None = None  # per-unit override (calibration K-subset cells); None = plan seeds
 
 
 @dataclass
@@ -47,7 +48,9 @@ class Plan:
 
     @property
     def n_runs(self) -> Any:
-        return TBD if is_tbd(self.train_seeds) else len(self.units) * len(self.train_seeds)
+        if is_tbd(self.train_seeds):
+            return TBD
+        return sum(len(u.train_seeds) if u.train_seeds is not None else len(self.train_seeds) for u in self.units)
 
     @property
     def gpu_hours(self) -> Any:
@@ -62,7 +65,7 @@ class Plan:
         return [
             RunSpec(self.task.name, u.condition, u.budget, u.subset_index, s)
             for u in self.units
-            for s in self.train_seeds
+            for s in (u.train_seeds if u.train_seeds is not None else self.train_seeds)
         ]
 
     def subset_seed(self, spec: RunSpec) -> int | None:
@@ -85,8 +88,12 @@ class Plan:
         ]
         for u in self.units:
             sub = f"  subset {u.subset_index} (seed {u.subset_seed})" if u.subset_index is not None else ""
-            lines.append(f"  - {u.condition.label:<28} budget {u.budget}{sub}")
-        lines.append(f"runs: {len(self.units)} cells x {n_seeds} seeds = {self.n_runs}")
+            own = f"  train seeds {list(u.train_seeds)}" if u.train_seeds is not None else ""
+            lines.append(f"  - {u.condition.label:<28} budget {u.budget}{sub}{own}")
+        if any(u.train_seeds is not None for u in self.units):
+            lines.append(f"runs: {len(self.units)} cells, per-cell seeds = {self.n_runs}")
+        else:
+            lines.append(f"runs: {len(self.units)} cells x {n_seeds} seeds = {self.n_runs}")
         lines.append(f"steps per run: {self.steps}")
         lines.append(f"per-run GPU-h: {per}   total GPU-h: {self.gpu_hours}")
         lines += [f"note: {n}" for n in self.notes]
@@ -206,5 +213,15 @@ def make_calibration_plan(cal_path: str, mode: str = "calibration") -> Plan:
     notes = [f"calibration on {cal.dataset}: full data, {cal.n_final_rollouts} final rollouts, "
              f"{cal.n_intermediate_rollouts} rollouts at intermediate checkpoints "
              f"(save every {cal.raw('intermediate_save_freq')} steps)"]
+    rs = cal.random_subsets
+    if rs:  # K random subsets x their own train seeds, to estimate s_sub (D-019: K < 8 is calibration-only)
+        seeds = protocol.random_subset_seeds
+        k = int(rs["n_subsets"])
+        if k > len(seeds):
+            raise ConfigError(f"calibration asks for {k} random subsets, protocol has {len(seeds)}")
+        own = tuple(int(x) for x in rs["train_seeds"])
+        units += [Unit(Condition.random(), float(rs["budget"]), i, seeds[i], own) for i in range(k)]
+        notes.append(f"random subsets: K={k} at budget {rs['budget']} x train seeds {list(own)} "
+                     f"(subset seeds {list(seeds[:k])}); calibration only (D-019)")
     return Plan(cal, protocol, task, units, list(cal.train_seeds), notes,
                 steps_override=cal.raw("steps"), kind="calibration")

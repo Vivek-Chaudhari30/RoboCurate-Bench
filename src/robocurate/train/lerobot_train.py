@@ -67,6 +67,7 @@ def build_train_cmd(
     steps: int | None = None,
     device: str = "cuda",
     sample_weighting_progress: str | Path | None = None,
+    num_workers: int | None = None,
 ) -> list[str]:
     """`steps` overrides task.steps (calibration configs carry their own); `save_freq` defaults to steps.
 
@@ -101,6 +102,10 @@ def build_train_cmd(
         f"--job_name={out_dir.name}",
         "--wandb.enable=false",
     ]
+    if num_workers is not None:  # D-027: DataLoader workers (speed only; configs/train.py:101, default 4)
+        if int(num_workers) < 0:
+            raise ConfigError("num_workers must be >= 0")
+        cmd.append(f"--num_workers={int(num_workers)}")
     if weighting:
         cmd += ["--sample_weighting.type=rabc", f"--sample_weighting.progress_path={sample_weighting_progress}",
                 "--sample_weighting.head_mode=sparse"]

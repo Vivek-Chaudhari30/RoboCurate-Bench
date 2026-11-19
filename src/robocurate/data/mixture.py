@@ -59,13 +59,14 @@ class Recipe:
     pause: dict[str, int] = field(default_factory=dict)  # n_episodes, k_min, k_max
     duplicate: dict[str, int] = field(default_factory=dict)  # n_episodes
     wrong_task: dict[str, int] = field(default_factory=dict)  # n_episodes
+    deferred_sources: tuple[dict, ...] = ()  # generated in the GPU phase; not part of the CPU-buildable plan
     sha256: str = ""
 
     @classmethod
     def load(cls, path: str | Path) -> Recipe:
         raw = Path(path).read_bytes()
         d = load_yaml(path)
-        allowed = {"name", "repo_id", "seed", "sources", "wrong_task_strings", "defects"}
+        allowed = {"name", "repo_id", "seed", "sources", "wrong_task_strings", "defects", "deferred_sources"}
         if set(d) - allowed:
             raise ConfigError(f"{path}: unknown keys {sorted(set(d) - allowed)}")
         dd = d.get("defects", {}) or {}
@@ -82,8 +83,57 @@ class Recipe:
             pause=dict(dd.get("pause", {})),
             duplicate=dict(dd.get("duplicate", {})),
             wrong_task=dict(dd.get("wrong_task", {})),
+            deferred_sources=tuple(_check_deferred(x, path) for x in d.get("deferred_sources", ()) or ()),
             sha256=hashlib.sha256(raw).hexdigest(),
-        )
+        )._checked(path)
+
+    def _checked(self, path) -> Recipe:
+        for name, spec in (("pause", self.pause), ("duplicate", self.duplicate), ("wrong_task", self.wrong_task)):
+            if spec and ("n_episodes" in spec) == ("rate" in spec):
+                raise ConfigError(f"{path}: defects.{name} needs exactly one of n_episodes / rate")
+            if "rate" in spec and not 0.0 <= float(spec["rate"]) <= 1.0:
+                raise ConfigError(f"{path}: defects.{name}.rate must be in [0, 1]")
+        return self
+
+    @property
+    def n_deferred_episodes(self) -> int:
+        return sum(int(x["n_episodes"]) for x in self.deferred_sources)
+
+
+DEFERRED_KINDS = ("policy", "scripted_replay")
+
+
+def _check_deferred(x: dict, path) -> dict:
+    """A source generated in the GPU phase (D-031): declared in the recipe so it is hashed and pre-registered, but
+    never built on CPU. policy: rollouts of full-data checkpoints at training fractions; scripted_replay: the scripted
+    policy executed in sim with Perturbations (D-011 replay mode)."""
+    need = {"name", "source", "n_episodes", "generated_in"}
+    if not need <= set(x):
+        raise ConfigError(f"{path}: deferred source needs {sorted(need)}; got {sorted(x)}")
+    if x["source"] not in DEFERRED_KINDS or x["generated_in"] != "gpu_phase":
+        raise ConfigError(f"{path}: deferred source kind must be one of {DEFERRED_KINDS}, generated_in gpu_phase")
+    n = int(x["n_episodes"])
+    parts = x.get("checkpoints") if x["source"] == "policy" else x.get("perturbations")
+    if not parts or sum(int(p["n_episodes"]) for p in parts) != n:
+        raise ConfigError(f"{path}: deferred source {x['name']}: per-part n_episodes must sum to {n}")
+    if x["source"] == "scripted_replay":
+        for p in parts:
+            if p["type"] not in PERTURBATIONS:
+                raise ConfigError(f"{path}: unknown perturbation {p['type']!r}; allowed {sorted(PERTURBATIONS)}")
+    else:
+        for p in parts:
+            if not 0 < float(p["train_fraction"]) <= 1:
+                raise ConfigError(f"{path}: checkpoint train_fraction must be in (0, 1]")
+    return dict(x)
+
+
+def defect_count(spec: dict, n_base: int) -> int:
+    """n_episodes, or round-half-up(rate x n_base) for rate-based defects (D-031)."""
+    if not spec:
+        return 0
+    if "n_episodes" in spec:
+        return int(spec["n_episodes"])
+    return int(np.floor(float(spec["rate"]) * n_base + 0.5))
 
 
 @dataclass(frozen=True)
@@ -118,9 +168,9 @@ def plan_mixture(recipe: Recipe, source_lengths: dict[str, list[int]]) -> list[E
     items = [base[i] for i in order]
     n = len(items)
 
-    n_pause = int(recipe.pause.get("n_episodes", 0))
-    n_wrong = int(recipe.wrong_task.get("n_episodes", 0))
-    n_dup = int(recipe.duplicate.get("n_episodes", 0))
+    n_pause = defect_count(recipe.pause, n)
+    n_wrong = defect_count(recipe.wrong_task, n)
+    n_dup = defect_count(recipe.duplicate, n)
     if n_pause + n_wrong + n_dup > n:
         raise ConfigError(f"{n_pause + n_wrong + n_dup} defect episodes requested from {n} base episodes")
     if n_wrong and not recipe.wrong_task_strings:
@@ -321,11 +371,12 @@ def make_perturbations(specs: tuple[dict, ...]) -> list:
     return out
 
 
-def policy_rollout_seeds(protocol: Any, n: int) -> list[int]:
+def policy_rollout_seeds(protocol: Any, n: int, offset: int = 0) -> list[int]:
+    """n curation seeds from the TOP of the range downward, skipping the first `offset` (earlier deferred sources)."""
     lo, hi = protocol.curation_seed_range
-    if n > hi - lo + 1:
+    if offset < 0 or n + offset > hi - lo + 1:
         raise ConfigError("not enough curation seeds")
-    seeds = list(range(hi, hi - n, -1))
+    seeds = list(range(hi - offset, hi - offset - n, -1))
     e0, e1 = protocol.eval_seed_range()
     if any(e0 <= s < e1 for s in seeds):
         raise ConfigError("policy-rollout seeds overlap eval seeds")
@@ -333,9 +384,9 @@ def policy_rollout_seeds(protocol: Any, n: int) -> list[int]:
 
 
 def collect_policy_episodes(sources: list[PolicySource], load_policy, env_factory, protocol: Any,
-                            max_steps: int) -> list[PolicyEpisode]:
+                            max_steps: int, seed_offset: int = 0) -> list[PolicyEpisode]:
     """load_policy(source) -> callable obs -> action; env_factory() -> gym-style env (info['is_success'])."""
-    seeds = policy_rollout_seeds(protocol, sum(s.n_episodes for s in sources))
+    seeds = policy_rollout_seeds(protocol, sum(s.n_episodes for s in sources), seed_offset)
     out, k = [], 0
     for src in sources:
         base = load_policy(src)
@@ -359,7 +410,7 @@ def collect_policy_episodes(sources: list[PolicySource], load_policy, env_factor
 
 
 def write_policy_dataset(episodes: list[PolicyEpisode], repo_id: str, root: str | Path, fps: int, task: str,
-                         shuffle_seed: int) -> Path:
+                         shuffle_seed: int, source_label: str = "policy") -> Path:
     """LeRobot dataset (no video) + labels sidecar. Episode order shuffled by shuffle_seed (D-021)."""
     from lerobot.datasets.lerobot_dataset import LeRobotDataset
 
@@ -379,7 +430,7 @@ def write_policy_dataset(episodes: list[PolicyEpisode], repo_id: str, root: str 
                 ds.add_frame({"task": task, "observation.state": s, "action": a})
             ds.save_episode()
             names = ep.perturbation_names
-            labels.append(EpisodeLabel(out_i, "policy", ep.source.checkpoint, ep.seed, defects=names,
+            labels.append(EpisodeLabel(out_i, source_label, ep.source.checkpoint, ep.seed, defects=names,
                                        quality_tier=max([DEFECT_TIER[d] for d in names] or ["clean"], key=TIERS.index),
                                        checkpoint_step=ep.source.checkpoint_step, success=ep.success,
                                        perturbations=names))
@@ -388,3 +439,40 @@ def write_policy_dataset(episodes: list[PolicyEpisode], repo_id: str, root: str 
     write_labels(LabelsSidecar(dataset=repo_id, recipe_sha256="policy-source", seed=shuffle_seed, episodes=labels),
                  sidecar_path(root))
     return root
+
+
+# ---------------------------------------------------------------------------- deferred sources (D-031)
+
+
+def deferred_seed_offset(recipe: Recipe, name: str) -> int:
+    """Curation-seed offset of a deferred source: the episodes of the deferred sources listed before it, so two
+    GPU-phase sources never share a seed (both take seeds from the top of curation_seed_range)."""
+    off = 0
+    for x in recipe.deferred_sources:
+        if x["name"] == name:
+            return off
+        off += int(x["n_episodes"])
+    raise ConfigError(f"no deferred source named {name!r}")
+
+
+def replay_policy_sources(spec: dict, protocol: Any, seed_offset: int, checkpoint: str = "scripted",
+                          checkpoint_step: int = 0) -> list[PolicySource]:
+    """Expand a scripted_replay deferred source into one PolicySource per episode (D-011 replay mode: the scripted
+    policy executed in sim with a Perturbation). A `sigma_range: [lo, hi]` jitter gets a per-episode sigma drawn
+    uniformly from np.random.default_rng(<that episode's curation seed>), so it is fixed by the seed alone."""
+    if spec.get("source") != "scripted_replay":
+        raise ConfigError("replay_policy_sources needs a scripted_replay deferred source")
+    seeds = policy_rollout_seeds(protocol, int(spec["n_episodes"]), seed_offset)
+    out, k = [], 0
+    for part in spec["perturbations"]:
+        part = dict(part)
+        n = int(part.pop("n_episodes"))
+        for _ in range(n):
+            p = dict(part)
+            if "sigma_range" in p:
+                lo, hi = (float(x) for x in p.pop("sigma_range"))
+                p["sigma"] = float(np.random.default_rng(seeds[k]).uniform(lo, hi))
+            out.append(PolicySource(f"{spec['name']}_{p['type']}_{k}", checkpoint, checkpoint_step, 1, (p,)))
+            k += 1
+    return out
+

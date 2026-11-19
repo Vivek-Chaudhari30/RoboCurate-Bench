@@ -1,0 +1,14 @@
+# M0 calibration for Task B: Diffusion Policy on the PushT human demos (lerobot/pusht), mirroring Task A's M0
+# design: full data x 3 train seeds, plus K = 4 random subsets at budget 0.5 x 2 train seeds (s_sub; K < 8 is
+# calibration-only, D-019). Evals use calibration_seed_start (D-017), never eval seeds.
+name: m0_diffusion_pusht_human
+task: configs/tasks/pusht_diffusion.yaml
+protocol: configs/protocol.yaml
+dataset: lerobot/pusht
+train_seeds: [1000, 1001, 1002]
+steps: TBD                         # S, written by m0_pipeline.sh stage d (LeRobot default capped at 2.5 h/run)
+n_final_rollouts: 200
+n_intermediate_rollouts: 50
+intermediate_save_freq: TBD        # written by stage d (S / 5)
+random_subsets: {budget: 0.5, n_subsets: 4, train_seeds: [1000, 1001]}
+num_workers: null                  # D-027: set only by the stage b2 I/O check (speed, not results)

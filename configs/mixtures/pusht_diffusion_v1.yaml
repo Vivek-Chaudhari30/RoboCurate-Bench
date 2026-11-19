@@ -1,0 +1,25 @@
+# Task B mixture recipe v1 (D-030; same rules as D-031 where they apply). PROPOSAL until Vivek reviews it; it
+# freezes with eval-v1 and may change only before any entrant result exists.
+# Total planned: 306 episodes = 206 human (all of lerobot/pusht) + 100 policy rollouts (GPU phase).
+# No scripted source exists for PushT (docs/task_b_readiness.md), so there are no replay-mode perturbations.
+name: pusht_diffusion_v1
+repo_id: robocurate/task_b_v1
+seed: 30                                   # recipe seed: episode order shuffled by it (D-021)
+sources:
+  - {dataset: lerobot/pusht, source: human, n_episodes: 206, revision: 7628202a2180972f291ba1bc6723834921e72c19}
+defects:
+  # Interior pause episode rate median 0.50 (docs/defect_validation.md). Length range of per-dataset medians
+  # 0.62-1.20 s = 6-12 frames at 10 fps (PushT fps, envs/configs.py:194).
+  pause: {rate: 0.50, k_min: 6, k_max: 12}
+  duplicate: {rate: 0.0}                   # 0 exact / 0 near duplicates observed -> median rate 0
+  # wrong_task: excluded: Diffusion Policy does not condition on the task string.
+deferred_sources:
+  - name: policy_rollouts
+    source: policy
+    generated_in: gpu_phase                # full-data diffusion checkpoints of the M0 Task B seed-1000 run
+    n_episodes: 100
+    checkpoints:
+      - {train_fraction: 0.10, n_episodes: 25}
+      - {train_fraction: 0.30, n_episodes: 25}
+      - {train_fraction: 0.60, n_episodes: 25}
+      - {train_fraction: 1.00, n_episodes: 25}

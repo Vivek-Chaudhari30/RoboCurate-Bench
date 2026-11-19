@@ -1,5 +1,7 @@
 # M0 calibration: ACT on the human transfer-cube demos, full data. Measures seed-to-seed sigma (for the
 # D-005 power analysis), per-run GPU-h, and where success plateaus (to choose `steps`).
+# Design: full data x 3 train seeds + K = 4 random subsets at budget 0.5 x 2 train seeds (s_sub; K < 8 is
+# calibration-only, D-019). Evals use calibration_seed_start (D-017), never eval seeds.
 name: m0_act_transfer_cube_human
 task: configs/tasks/aloha_transfer_cube.yaml
 protocol: configs/protocol.yaml
@@ -9,3 +11,5 @@ steps: TBD
 n_final_rollouts: 200
 n_intermediate_rollouts: 50
 intermediate_save_freq: TBD
+random_subsets: {budget: 0.5, n_subsets: 4, train_seeds: [1000, 1001]}
+num_workers: null                  # D-027: set only by the stage b2 I/O check (speed, not results)
