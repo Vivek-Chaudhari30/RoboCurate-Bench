@@ -91,7 +91,7 @@
 | 2026-11-19T05:55Z | Part 0: D-016/017/018, protocol `calibration_seed_start: 300000`, CLAUDE.md rule 10 | `63a9a5a` | committed | 0 |
 | 2026-11-19T05:55Z | Part 1: D-016 variance components, Satterthwaite test, Design/power/MDE, grid script | (this commit) | **blocked, B-002** | 0 |
 
-Part 1 commands: `pytest -q -m "not gpu and not slow"` 144 passed; `-m slow` 8 passed; `-m integration` 3 passed;
+Part 1 commands: `pytest -q -m "not gpu and not slow"` 143 passed; `-m slow` 8 passed; `-m integration` 3 passed;
 `ruff check .` clean; `python scripts/d016_null_grid.py --n 40000`. `robocurate report` still uses Welch
 (unchanged) until B-002 is resolved. `SEED_FLOOR` / `test: welch_holm` in the protocol are unchanged for the same reason.
 
