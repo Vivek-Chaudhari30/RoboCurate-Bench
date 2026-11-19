@@ -15,6 +15,10 @@ Hokkaido read-only check (13:51 UTC) found two further Step 3 blockers, independ
 - GPU busy: one process of another user, 27 556 MiB, 58% utilization, running for ~7 days. The 2 h poll limit would
   very likely expire.
 
+Tests (Mac, CPU, `dba6618`): default incl. integration 203 passed + 1 xfailed (CUPID); slow 10 passed, 1 failed
+(`test_primary_test_null_calibration`, B-004, intended; `test_flags_exist_in_help_or_dataclasses` needs the rcb env's
+bin on PATH and passes with it); ruff clean.
+
 See B-004 under "## Blocked" for the table, the cause, and the options.
 
 ## Morning summary (overnight m1-core)
