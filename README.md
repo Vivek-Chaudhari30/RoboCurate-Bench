@@ -1,36 +1,127 @@
 # RoboCurate-Bench
 
-Does cleaning robot demonstration data actually help? RoboCurate-Bench tests whether robot-data "cleaners"
-(episode filters) improve imitation-learning policy success **compared with size-matched random subsets of the
-same data** (the placebo), in simulation.
+**Does cleaning your robot data actually help?**
 
-**Status: software core only. No results yet.** Next milestone: GPU calibration (M0).
+Many tools now promise to find the "bad" demonstrations in a robot dataset. RoboCurate-Bench tests whether
+training on the episodes a cleaner keeps beats training on **size-matched random subsets of the same data**, the
+placebo. Policies are trained under one fixed protocol and evaluated in simulation. The protocol is the product. A
+fast wrong number is worse than no number.
 
-## Protocol in brief
+> **Results: pending.** The software core and the launch entrants are built and tested on CPU. GPU calibration (M0)
+> has not run yet. Every number you can produce today comes from the **fake backend** and is labeled FAKE.
 
-- Every cleaner is compared with >= 3 size-matched random subsets and with full data, at the same episode
-  budget (launch budget: keep 50%).
-- Identical training config for every condition: same step count and hyperparameters (LeRobot, pinned 0.6.1).
-- Only the final checkpoint at a fixed step count is evaluated, with >= 200 rollouts on fixed eval seeds.
-- Unit of analysis = training run. Primary test: Welch t-test of a cleaner's runs vs all placebo runs, with Holm
-  correction across cleaners. At least 6 training seeds per condition (D-015).
-- A label oracle (uses hidden ground-truth labels) is reported as a reference, not an entrant.
-- Cleaners never see labels, eval code, eval seeds or eval results; `robocurate submit` checks this.
-- Normalization stats come from each condition's own training subset.
+## Protocol in plain language
+
+- **Placebo, not just full data.** Every selection-track entrant is compared with K ≥ 8 random subsets of the same
+  size, at the same episode budget (launch budget: keep 50%), and with full data. A cleaner that only "helps"
+  because smaller data trains differently is caught by this comparison (D-002, D-019).
+- **Training runs are the unit.** Each training run contributes one number: the success rate of its final
+  checkpoint over ≥ 200 fixed eval rollouts. Rollouts are never pooled across runs (D-002, D-003).
+- **Subset luck is part of the error bar.** A deterministic cleaner picks one subset, and subsets differ in quality.
+  The test's standard error includes the subset-to-subset variance estimated from the placebo subsets, plus the
+  seed variance, with df = K − 1. Holm correction across entrants (D-016, D-019).
+- **Two tracks.**
+  - *Selection* entrants choose episodes.
+  - *Weighting* entrants (e.g. RA-BC) reweight training samples on the full data. Their placebo is the same
+    weights shuffled across episodes (D-020).
+- **Same training for everyone.** Same steps, hyperparameters and seeds for every condition. Normalization stats
+  come from each condition's own training data (D-004, D-013).
+- **No peeking.**
+  - Cleaners never see ground-truth labels, eval code, eval seeds or eval results.
+  - Cleaners that need rollouts get only curation seeds, under a cap of 100.
+  - Selections are computed once, cached, and costed as "curation GPU-h" (D-007, D-008, D-022).
+- **References, not entrants.**
+  - A label oracle (uses the hidden labels) shows whether curation can help on a task at all (D-012).
+  - Our own scorer, rcb-score v1, is frozen before any result (D-023).
 
 Full rules: [CLAUDE.md](CLAUDE.md). Decisions: [DECISIONS.md](DECISIONS.md). Status: [PROGRESS.md](PROGRESS.md).
 
-## Quick start (CPU)
+## Architecture
+
+```
+configs/          protocol.yaml (seeds, budgets, test), tasks/, grids/, mixtures/, calibration/
+src/robocurate/
+  data/           Hub loader, label-free DatasetView, mixtures (+ policy-rollout source), defects, validate
+  cleaners/       Cleaner API + registry, conformance (`submit`), import guard, entrants/
+  curation/       prepare cache, rollout service (curation seeds only), reference policy, progress models
+  train/ eval/    LeRobot command builders (lerobot-train / lerobot-eval; eval freezes at eval-v1)
+  runs/           planner, locked idempotent executor, fake + local backends, oracle, reproduce
+  report/         statistics (D-016/D-019), report.md, plot, static leaderboard site
+```
+
+Entrants:
+
+| entrant | track | kind |
+|---|---|---|
+| `lerobot_doctor` | selection | wrapped checker |
+| `kinema` | selection | wrapped checker |
+| `roboaudit` | selection | wrapped checker |
+| `rda` | selection | wrapped checker |
+| `robometer_filter` | selection | wrapped (LeRobot Robometer reward model) |
+| `rabc` | weighting | wrapped (LeRobot RA-BC) |
+| `demo_score` | selection | reimplementation |
+| `deminf` | selection | reimplementation |
+| `cupid` | selection | reimplementation |
+| `rcb_score` | selection | ours, v1 frozen |
+
+Baselines are random subsets, full data and the oracle.
+
+## Quickstart (CPU, fake backend)
 
 ```bash
 conda create -n rcb python=3.12 && conda activate rcb
-pip install -e ".[dev]"
+pip install -r requirements.lock && pip install -e ".[dev]" --no-deps
 cp scripts/env.example.sh scripts/env.sh && source scripts/env.sh
 robocurate plan configs/grids/task_a_v0.yaml
+robocurate prepare configs/grids/task_a_v0.yaml --backend fake
 robocurate run configs/grids/task_a_v0.yaml --backend fake --fake-params configs/fake/e2e_test.yaml
-robocurate report "$ROBOCURATE_SCRATCH/results/task_a_v0-fake"
-robocurate submit tests/fixtures/cleaners/good_cleaner.py
+robocurate report "$ROBOCURATE_SCRATCH/results/task_a_v0-fake" --site out/site
+robocurate reproduce <cell-id> --results-dir "$ROBOCURATE_SCRATCH/results/task_a_v0-fake" --backend fake \
+  --selections-dir "$ROBOCURATE_SCRATCH/selections/task_a_v0-fake"
+robocurate submit examples/cleaner_template/src/rcb_template_cleaner/cleaner.py
 ```
 
-The fake backend produces synthetic results with known effect sizes, to verify the pipeline. Its reports are
-labeled FAKE.
+To submit your own cleaner, see [docs/submit.md](docs/submit.md).
+
+## Limitations
+
+- **Simulation only.** Real-robot curation effects may differ.
+- **One policy class per task** (ACT on ALOHA transfer-cube for Task A). A cleaner can help one architecture and not
+  another.
+- **Single-mixture subset-variance floor.** A cleaner applied to one mixture yields one subset. More seeds cannot
+  remove that variance; only more random subsets (K) and mixture replicates (R) shrink it. The MDE at the launch
+  design may be large (Part 1 simulations: ≤ 0.32 power for a 15 pp effect once the subset SD reaches 0.04).
+- **Null calibration is open for one design.** The primary test misses its K ≥ 8 calibration target at one seed
+  per random subset (PROGRESS.md B-003). Designs with ≥ 2 seeds per subset pass.
+- **Reward-model coverage.** Robometer-based entrants depend on one reward model and its revision. The mock used
+  in tests says nothing about it.
+- **Checker coverage.**
+  - Wrapped checkers have not yet been executed in the benchmark environment.
+  - trajlens and retake are not adapted (dependency conflicts / external API use).
+  - lerobot-doctor reports at most 20 flagged episodes.
+- **Reimplementations.** CUPID, DemInf and Demo-SCORE are reimplementations with declared adaptations. CUPID does
+  not pass its toy sanity check with published defaults.
+
+## Credits
+
+- **LeRobot** (Hugging Face): datasets, ACT, training/eval, Robometer and RA-BC. https://github.com/huggingface/lerobot
+- **CUPID**: Agia et al., "CUPID: Curating Data your Robot Loves with Influence Functions", CoRL 2025, arXiv
+  2506.19121. Reference code: github.com/agiachris/cupid (MIT).
+- **DemInf**: Hejna et al., "Robot Data Curation with Mutual Information Estimators", RSS 2025, arXiv 2502.08623.
+  Reference code: github.com/jhejna/demonstration-information (MIT).
+- **Demo-SCORE**: Chen, Lessing et al., "Curating Demonstrations using Online Experience", RSS 2025, arXiv
+  2503.03707. Reference code: github.com/alessing/demo-score (no license file; not redistributed).
+- **QoQ**: Lee et al., "Quality over Quantity: Demonstration Curation via Influence Functions for Data-Centric Robot
+  Learning", ICRA 2026, arXiv 2603.09056. TODO: official code link (none found).
+- **DataMIL**: Dass et al., "DataMIL: Selecting Data for Robot Imitation Learning with Datamodels", ICLR 2026, arXiv
+  2505.09603. Code: github.com/UT-Austin-RobIn/datamil (MIT).
+- **CuraEval**: VERIFY CITATION. TODO: no paper or repository by this name was found (2026-11-19).
+- **RA-BC / SARM**: arXiv 2509.25358 (Eq. 8-9 as implemented in lerobot `rewards/sarm/rabc.py`). TODO: full
+  author list.
+- **Robometer**: reward model `lerobot/Robometer-4B` via lerobot `rewards/robometer`. TODO: paper citation.
+- **Checkers**:
+  - lerobot-doctor 0.2.0 (Apache-2.0).
+  - kinema 0.1.0 (Apache-2.0).
+  - roboaudit 0.3.1 (MIT).
+  - Robot Data Audit (RDA), github.com/liesliy/rda (MIT).
+- **KSG estimator**: Kraskov, Stögbauer, Grassberger, Phys. Rev. E 69, 066138 (2004).
