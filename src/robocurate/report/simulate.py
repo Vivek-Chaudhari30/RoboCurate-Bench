@@ -17,7 +17,18 @@ from robocurate.report import stats as S
 
 SIGMA_SUB = (0.0, 0.02, 0.04, 0.06)
 SIGMA_SEED = (0.03, 0.06)
-DESIGNS = ((4, 2, 3), (8, 2, 3), (8, 1, 3))  # (K, n_p, n_c)
+# (K, n_p, n_c). Result-eligible (D-019 + D-024): K >= 8 and n_p >= 2; the eligible designs are those of the M0
+# power table (n_c in {3, 5}, K in {8, 12}, n_p = 2). (4, 2, 3) is calibration-only; (8, 1, 3) is kept in the table
+# as the not-eligible n_p = 1 case (B-003).
+DESIGNS = ((4, 2, 3), (8, 2, 3), (8, 2, 5), (12, 2, 3), (12, 2, 5), (8, 1, 3))
+ELIGIBLE_BOUND = 0.06  # upper 95% MC bound on the FWER, result-eligible cells
+CALIBRATION_BOUND = 0.07  # FWER, K < 8 cells (calibration only, D-019)
+
+
+def result_eligible(K: int, n_p: int) -> bool:
+    from robocurate.config import RESULT_MIN_PLACEBO_SEEDS, RESULT_MIN_SUBSETS
+
+    return K >= RESULT_MIN_SUBSETS and n_p >= RESULT_MIN_PLACEBO_SEEDS
 
 
 def simulate(rng, n, sigma_sub, sigma_seed, K, n_p, n_c, n_cleaners=7, base=0.5, effects=None, n_rollouts=200):
@@ -49,6 +60,19 @@ class Cell:
         """One-sided-style upper 95% MC bound (normal approx, p + 1.96 SE)."""
         return self.fwer + 1.959963984540054 * self.mc_se
 
+    @property
+    def eligible(self) -> bool:
+        return result_eligible(self.K, self.n_p)
+
+    @property
+    def verdict(self) -> str | None:
+        """'ok' / 'FAIL' for cells with a pass criterion; None for n_p = 1 (not result-eligible, no pass/fail)."""
+        if self.eligible:
+            return "ok" if self.upper95 <= ELIGIBLE_BOUND else "FAIL"
+        if self.n_p >= 2:  # K < 8: calibration-only, FWER <= 0.07
+            return "ok" if self.fwer <= CALIBRATION_BOUND else "FAIL"
+        return None
+
 
 def _fwer(c, p, alpha=0.05, chunk=50_000) -> float:
     hits = 0
@@ -79,7 +103,7 @@ def power_cell(effect, sigma_sub, sigma_seed, K, n_p, n_c, n_grids, n_cleaners=7
 
 def grid(n_small: int = 40_000, n_large: int = 200_000, n_power: int = 20_000, seed: int = 0,
          power: bool = True) -> list[Cell]:
-    """K < 8 cells get n_small grids; K >= 8 cells (two-tier bound) get n_large."""
+    """K < 8 cells get n_small grids; K >= 8 cells get n_large."""
     out = []
     for ss, sd, (K, n_p, n_c) in itertools.product(SIGMA_SUB, SIGMA_SEED, DESIGNS):
         n = n_large if K >= 8 else n_small
@@ -94,14 +118,18 @@ def grid(n_small: int = 40_000, n_large: int = 200_000, n_power: int = 20_000, s
 
 
 def markdown(cells: list[Cell]) -> str:
-    L = ["| sigma_sub | sigma_seed | K, n_p, n_c | grids | FWER | MC SE | upper 95% | bound | power 15pp (MC) "
-         "| power 15pp (analytic) |", "|---|---|---|---|---|---|---|---|---|---|"]
+    L = ["| sigma_sub | sigma_seed | K, n_p, n_c | eligibility | grids | FWER | MC SE | upper 95% | criterion "
+         "| power 15pp (MC) | power 15pp (analytic) |", "|---|---|---|---|---|---|---|---|---|---|---|"]
     for c in cells:
-        bound = 0.06 if c.K >= 8 else 0.07
-        val = c.upper95 if c.K >= 8 else c.fwer
-        ok = "ok" if val <= bound else "**FAIL**"
-        L.append(f"| {c.sigma_sub:.2f} | {c.sigma_seed:.2f} | {c.K}, {c.n_p}, {c.n_c} | {c.n_grids} | {c.fwer:.4f} "
-                 f"| {c.mc_se:.4f} | {c.upper95:.4f} | {'upper95' if c.K >= 8 else 'FWER'} <= {bound} {ok} "
+        if c.eligible:
+            elig, crit = "result-eligible", f"upper95 <= {ELIGIBLE_BOUND} {c.verdict}"
+        elif c.n_p >= 2:
+            elig, crit = "calibration only (K < 8)", f"FWER <= {CALIBRATION_BOUND} {c.verdict}"
+        else:
+            elig, crit = "not result-eligible (n_p = 1)", "— (no pass/fail)"
+        crit = crit.replace("FAIL", "**FAIL**")
+        L.append(f"| {c.sigma_sub:.2f} | {c.sigma_seed:.2f} | {c.K}, {c.n_p}, {c.n_c} | {elig} | {c.n_grids} "
+                 f"| {c.fwer:.4f} | {c.mc_se:.4f} | {c.upper95:.4f} | {crit} "
                  f"| {'—' if c.power15 is None else f'{c.power15:.3f}'} "
                  f"| {'—' if c.power15_analytic is None else f'{c.power15_analytic:.3f}'} |")
     return "\n".join(L)

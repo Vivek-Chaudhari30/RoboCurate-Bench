@@ -8,7 +8,7 @@ import os
 import sys
 from pathlib import Path
 
-from robocurate.config import ConfigError, config_type, tbd_fields
+from robocurate.config import ConfigError, config_type, is_tbd, tbd_fields
 
 FROZEN_MARKER = Path("src/robocurate/eval/FROZEN")
 
@@ -38,8 +38,11 @@ def cmd_plan(args) -> int:
 
 def _result_mode_guard(plan) -> None:
     from robocurate.config import check_result_subsets
+    from robocurate.runs.planner import check_result_placebo_seeds
 
     check_result_subsets(plan.grid)  # D-019: K >= 8
+    if not is_tbd(plan.train_seeds):  # TBD seeds are refused below
+        check_result_placebo_seeds(plan)  # D-024: n_p >= 2
     if not _repo_path(FROZEN_MARKER).exists():
         raise ConfigError(f"result mode refused: {FROZEN_MARKER} does not exist (eval code not frozen)")
     missing = tbd_fields(plan.protocol) + [f"task.{f}" for f in tbd_fields(plan.task)]

@@ -123,6 +123,31 @@ def build_units(grid: GridConfig, protocol: ProtocolConfig) -> list[Unit]:
     return units
 
 
+PLACEBO_KINDS = ("random", "weight_placebo")
+
+
+def placebo_seed_counts(plan: Plan) -> dict[tuple[str, float, int], int]:
+    """Training runs (seeds) per placebo unit: n_p for each random subset / weight permutation."""
+    counts: dict[tuple[str, float, int], int] = {}
+    for s in plan.specs():
+        if s.condition.kind in PLACEBO_KINDS:
+            key = (s.condition.label, s.budget, s.subset_index)
+            counts[key] = counts.get(key, 0) + 1
+    return counts
+
+
+def check_result_placebo_seeds(plan: Plan) -> None:
+    """D-024: result-mode runs need n_p >= 2 seeds per placebo subset (selection) and per permutation (weighting)."""
+    from robocurate.config import RESULT_MIN_PLACEBO_SEEDS
+
+    low = {k: n for k, n in placebo_seed_counts(plan).items() if n < RESULT_MIN_PLACEBO_SEEDS}
+    if low:
+        (label, budget, idx), n = min(low.items(), key=lambda kv: kv[1])
+        raise ConfigError(f"result mode refused: {len(low)} placebo unit(s) have fewer than "
+                          f"{RESULT_MIN_PLACEBO_SEEDS} seeds (e.g. {label} budget {budget} subset {idx}: n_p = {n}); "
+                          f"D-024 requires n_p >= {RESULT_MIN_PLACEBO_SEEDS}")
+
+
 def make_plan(
     grid_path: str,
     mode: str = "plan",

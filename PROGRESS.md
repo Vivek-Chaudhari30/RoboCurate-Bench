@@ -1,5 +1,22 @@
 # PROGRESS
 
+## Status 2026-11-19 ~14:00 UTC — B-003/M0-launch task STOPPED at Step 1 (B-004)
+
+Branch `m1-core`. D-024 is recorded and implemented (result mode refuses n_p < 2). The hard FPR test, run on the
+result-eligible designs of the M0 power table (K in {8, 12}, n_p = 2, n_c in {3, 5}), **fails 6 eligible cells, all
+with n_c = 5** (upper 95% up to 0.0773 > 0.06). Stop condition: "If any allowed cell fails the bound, STOP and report
+the table. Do not adjust the test." Steps 2–7 were not started: m0-calibration was not fast-forwarded, nothing was
+launched on hokkaido, no checker was installed. GPU-h 0.
+
+Hokkaido read-only check (13:51 UTC) found two further Step 3 blockers, independent of B-004:
+- `/disk/u/vivek` does not exist (there is no `/disk` mount). Candidates, NOT chosen: `/share/datasets` (NFS, 42 T
+  free), `/share/NFS/...` outside `$HOME` (NFS, 32 T free; `$HOME` = `/share/NFS/u/vivek`), local NVMe `/` (98% full,
+  52 G free).
+- GPU busy: one process of another user, 27 556 MiB, 58% utilization, running for ~7 days. The 2 h poll limit would
+  very likely expire.
+
+See B-004 under "## Blocked" for the table, the cause, and the options.
+
 ## Morning summary (overnight m1-core)
 
 Branch `m1-core` (from `m0-calibration` @ `0218b8c`), pushed after every item. Overnight run 2026-11-19
@@ -91,11 +108,154 @@ launched: the previous task stopped at B-003. There is no M0 log path. The GPU w
 
 **Next step:** decide B-003. Then launch M0 (Part 2–4 of the M0 task) when hokkaido's GPU is free.
 
-**Current milestone: M0 — BLOCKED at D-019 calibration (B-003: K=8, n_p=1 cell misses the 0.06 bound); GPU work not started**
+**Current milestone: M0 — BLOCKED at D-024 calibration (B-004: n_c = 5, n_p = 2 cells miss the 0.06 bound); no scratch dir on hokkaido; GPU busy; GPU work not started**
 
 ## Blocked
 
-- **B-003 (2026-11-19T06:18Z, OPEN) — the D-019 test (df = K−1) misses the K >= 8 tier at n_p = 1.**
+- **B-004 (2026-11-19T13:55Z, OPEN) — the D-019/D-024 test misses the 0.06 bound on result-eligible designs with n_c > n_p.**
+  Stop condition (B-003 task, Step 1): "If any allowed cell fails the bound, STOP and report the table. Do not
+  adjust the test."
+  - *What was run.* `test_primary_test_null_calibration` with the eligible cells = the M0 power-table designs the task
+    prompt names (n_c in {3, 5}, K in {8, 12}, n_p = 2), chosen from the prompt, not from results. 200 000 grids per
+    eligible cell; the K = 4 cell keeps its calibration-only FWER <= 0.07 check; the n_p = 1 cell is reported as
+    not result-eligible with no pass/fail (D-024).
+  - *Result.* (8, 2, 3) and (12, 2, 3) pass every sigma cell (max upper 95% 0.0487 and 0.0529). (8, 2, 5) fails 3 of
+    8 sigma cells and (12, 2, 5) fails 3 of 8 (max upper 95% 0.0773 at sigma_sub 0.04, sigma_seed 0.03, K 12).
+  - *Cause (same mechanism as B-003).* With the pooled s_seed^2 and s_sub^2 = (MSB − s_seed^2)/n_p,
+    SE^2 = MSB(1 + 1/K)/n_p + s_seed^2 (1/n_c − 1/n_p) (before truncation). When n_c = n_p the s_seed^2 term
+    vanishes and SE^2 is MSB times a constant: exactly chi-square with K − 1 df, so df = K − 1 is exact (up to
+    clipping and the binomial). n_c < n_p adds a positive term (conservative). n_c > n_p subtracts one, which makes
+    the SE noisier than K − 1 df allows (liberal): weight −1/6 at (n_p 2, n_c 3) passes; −0.3 at (2, 5) fails;
+    −2/3 at (1, 3) was B-003.
+  - *Diagnostic probe (not part of the test; 200 000 grids per cell).* Every design with n_c <= n_p stays far
+    below the bound: max upper 95% 0.0433 (K 12, n_p 2, n_c 2). Table below the main table.
+  - *Note.* Today's planner gives every condition the same `train_seeds`, so grids can only produce n_c = n_p
+    designs (the exact case). Designs with n_c != n_p (the power table's n_c 5 / n_p 2) need per-condition seed
+    counts that grids cannot express yet.
+  - *Options (protocol decision, not made here).* (1) Require n_p >= n_c for result runs (amend D-024): valid by
+    construction, matches what the planner produces today, every probed cell passes; power table restricted to
+    n_c <= n_p. (2) Keep n_p >= 2 and add the parametric bootstrap (the named fallback). (3) Cap n_c at 3 when n_p = 2
+    (passes, but no principle for other n_p).
+  - *Done regardless.* D-024 appended; `check_result_placebo_seeds` (planner) wired into the result-mode guard; unit
+    tests `test_check_result_placebo_seeds_unit`, `test_result_mode_guard_refuses_np_below_2`,
+    `test_simulate_eligibility_labels`; the table labels eligibility and reports MC SE for every cell.
+  - Reproduce: `pytest -q -s -m slow -k null_calibration` (~30 s).
+
+Main table (`report/simulate.py`, D-024 labels):
+
+| sigma_sub | sigma_seed | K, n_p, n_c | eligibility | grids | FWER | MC SE | upper 95% | criterion | power 15pp (MC) | power 15pp (analytic) |
+|---|---|---|---|---|---|---|---|---|---|---|
+| 0.00 | 0.03 | 4, 2, 3 | calibration only (K < 8) | 40000 | 0.0000 | 0.0000 | 0.0001 | FWER <= 0.07 ok | 0.060 | 0.343 |
+| 0.00 | 0.03 | 8, 2, 3 | result-eligible | 200000 | 0.0024 | 0.0001 | 0.0026 | upper95 <= 0.06 ok | 0.767 | 0.860 |
+| 0.00 | 0.03 | 8, 2, 5 | result-eligible | 200000 | 0.0016 | 0.0001 | 0.0018 | upper95 <= 0.06 ok | 0.896 | 0.970 |
+| 0.00 | 0.03 | 12, 2, 3 | result-eligible | 200000 | 0.0070 | 0.0002 | 0.0074 | upper95 <= 0.06 ok | 0.917 | 0.954 |
+| 0.00 | 0.03 | 12, 2, 5 | result-eligible | 200000 | 0.0057 | 0.0002 | 0.0061 | upper95 <= 0.06 ok | 0.976 | 0.997 |
+| 0.00 | 0.03 | 8, 1, 3 | not result-eligible (n_p = 1) | 200000 | 0.0027 | 0.0001 | 0.0029 | — (no pass/fail) | 0.591 | 0.797 |
+| 0.00 | 0.06 | 4, 2, 3 | calibration only (K < 8) | 40000 | 0.0000 | 0.0000 | 0.0000 | FWER <= 0.07 ok | 0.004 | 0.147 |
+| 0.00 | 0.06 | 8, 2, 3 | result-eligible | 200000 | 0.0023 | 0.0001 | 0.0025 | upper95 <= 0.06 ok | 0.269 | 0.451 |
+| 0.00 | 0.06 | 8, 2, 5 | result-eligible | 200000 | 0.0016 | 0.0001 | 0.0018 | upper95 <= 0.06 ok | 0.476 | 0.666 |
+| 0.00 | 0.06 | 12, 2, 3 | result-eligible | 200000 | 0.0067 | 0.0002 | 0.0070 | upper95 <= 0.06 ok | 0.456 | 0.599 |
+| 0.00 | 0.06 | 12, 2, 5 | result-eligible | 200000 | 0.0055 | 0.0002 | 0.0058 | upper95 <= 0.06 ok | 0.690 | 0.830 |
+| 0.00 | 0.06 | 8, 1, 3 | not result-eligible (n_p = 1) | 200000 | 0.0026 | 0.0001 | 0.0028 | — (no pass/fail) | 0.183 | 0.383 |
+| 0.02 | 0.03 | 4, 2, 3 | calibration only (K < 8) | 40000 | 0.0000 | 0.0000 | 0.0000 | FWER <= 0.07 ok | 0.060 | 0.226 |
+| 0.02 | 0.03 | 8, 2, 3 | result-eligible | 200000 | 0.0100 | 0.0002 | 0.0104 | upper95 <= 0.06 ok | 0.610 | 0.654 |
+| 0.02 | 0.03 | 8, 2, 5 | result-eligible | 200000 | 0.0157 | 0.0003 | 0.0163 | upper95 <= 0.06 ok | 0.734 | 0.783 |
+| 0.02 | 0.03 | 12, 2, 3 | result-eligible | 200000 | 0.0221 | 0.0003 | 0.0228 | upper95 <= 0.06 ok | 0.781 | 0.804 |
+| 0.02 | 0.03 | 12, 2, 5 | result-eligible | 200000 | 0.0367 | 0.0004 | 0.0375 | upper95 <= 0.06 ok | 0.866 | 0.910 |
+| 0.02 | 0.03 | 8, 1, 3 | not result-eligible (n_p = 1) | 200000 | 0.0105 | 0.0002 | 0.0109 | — (no pass/fail) | 0.492 | 0.601 |
+| 0.02 | 0.06 | 4, 2, 3 | calibration only (K < 8) | 40000 | 0.0000 | 0.0000 | 0.0000 | FWER <= 0.07 ok | 0.005 | 0.118 |
+| 0.02 | 0.06 | 8, 2, 3 | result-eligible | 200000 | 0.0052 | 0.0002 | 0.0055 | upper95 <= 0.06 ok | 0.240 | 0.356 |
+| 0.02 | 0.06 | 8, 2, 5 | result-eligible | 200000 | 0.0061 | 0.0002 | 0.0065 | upper95 <= 0.06 ok | 0.413 | 0.505 |
+| 0.02 | 0.06 | 12, 2, 3 | result-eligible | 200000 | 0.0133 | 0.0003 | 0.0138 | upper95 <= 0.06 ok | 0.399 | 0.483 |
+| 0.02 | 0.06 | 12, 2, 5 | result-eligible | 200000 | 0.0180 | 0.0003 | 0.0186 | upper95 <= 0.06 ok | 0.590 | 0.668 |
+| 0.02 | 0.06 | 8, 1, 3 | not result-eligible (n_p = 1) | 200000 | 0.0054 | 0.0002 | 0.0058 | — (no pass/fail) | 0.174 | 0.308 |
+| 0.04 | 0.03 | 4, 2, 3 | calibration only (K < 8) | 40000 | 0.0014 | 0.0002 | 0.0018 | FWER <= 0.07 ok | 0.053 | 0.107 |
+| 0.04 | 0.03 | 8, 2, 3 | result-eligible | 200000 | 0.0362 | 0.0004 | 0.0370 | upper95 <= 0.06 ok | 0.324 | 0.311 |
+| 0.04 | 0.03 | 8, 2, 5 | result-eligible | 200000 | 0.0612 | 0.0005 | 0.0622 | upper95 <= 0.06 **FAIL** | 0.390 | 0.357 |
+| 0.04 | 0.03 | 12, 2, 3 | result-eligible | 200000 | 0.0507 | 0.0005 | 0.0517 | upper95 <= 0.06 ok | 0.436 | 0.423 |
+| 0.04 | 0.03 | 12, 2, 5 | result-eligible | 200000 | 0.0761 | 0.0006 | 0.0773 | upper95 <= 0.06 **FAIL** | 0.502 | 0.483 |
+| 0.04 | 0.03 | 8, 1, 3 | not result-eligible (n_p = 1) | 200000 | 0.0433 | 0.0005 | 0.0442 | — (no pass/fail) | 0.312 | 0.293 |
+| 0.04 | 0.06 | 4, 2, 3 | calibration only (K < 8) | 40000 | 0.0002 | 0.0001 | 0.0003 | FWER <= 0.07 ok | 0.008 | 0.074 |
+| 0.04 | 0.06 | 8, 2, 3 | result-eligible | 200000 | 0.0174 | 0.0003 | 0.0179 | upper95 <= 0.06 ok | 0.182 | 0.205 |
+| 0.04 | 0.06 | 8, 2, 5 | result-eligible | 200000 | 0.0326 | 0.0004 | 0.0334 | upper95 <= 0.06 ok | 0.278 | 0.260 |
+| 0.04 | 0.06 | 12, 2, 3 | result-eligible | 200000 | 0.0341 | 0.0004 | 0.0349 | upper95 <= 0.06 ok | 0.276 | 0.283 |
+| 0.04 | 0.06 | 12, 2, 5 | result-eligible | 200000 | 0.0586 | 0.0005 | 0.0597 | upper95 <= 0.06 ok | 0.383 | 0.362 |
+| 0.04 | 0.06 | 8, 1, 3 | not result-eligible (n_p = 1) | 200000 | 0.0178 | 0.0003 | 0.0184 | — (no pass/fail) | 0.159 | 0.186 |
+| 0.06 | 0.03 | 4, 2, 3 | calibration only (K < 8) | 40000 | 0.0083 | 0.0005 | 0.0092 | FWER <= 0.07 ok | 0.038 | 0.057 |
+| 0.06 | 0.03 | 8, 2, 3 | result-eligible | 200000 | 0.0478 | 0.0005 | 0.0487 | upper95 <= 0.06 ok | 0.157 | 0.146 |
+| 0.06 | 0.03 | 8, 2, 5 | result-eligible | 200000 | 0.0646 | 0.0005 | 0.0657 | upper95 <= 0.06 **FAIL** | 0.182 | 0.157 |
+| 0.06 | 0.03 | 12, 2, 3 | result-eligible | 200000 | 0.0520 | 0.0005 | 0.0529 | upper95 <= 0.06 ok | 0.209 | 0.198 |
+| 0.06 | 0.03 | 12, 2, 5 | result-eligible | 200000 | 0.0643 | 0.0005 | 0.0654 | upper95 <= 0.06 **FAIL** | 0.235 | 0.215 |
+| 0.06 | 0.03 | 8, 1, 3 | not result-eligible (n_p = 1) | 200000 | 0.0699 | 0.0006 | 0.0711 | — (no pass/fail) | 0.179 | 0.141 |
+| 0.06 | 0.06 | 4, 2, 3 | calibration only (K < 8) | 40000 | 0.0010 | 0.0002 | 0.0013 | FWER <= 0.07 ok | 0.012 | 0.047 |
+| 0.06 | 0.06 | 8, 2, 3 | result-eligible | 200000 | 0.0365 | 0.0004 | 0.0373 | upper95 <= 0.06 ok | 0.122 | 0.114 |
+| 0.06 | 0.06 | 8, 2, 5 | result-eligible | 200000 | 0.0618 | 0.0005 | 0.0628 | upper95 <= 0.06 **FAIL** | 0.169 | 0.131 |
+| 0.06 | 0.06 | 12, 2, 3 | result-eligible | 200000 | 0.0496 | 0.0005 | 0.0506 | upper95 <= 0.06 ok | 0.167 | 0.155 |
+| 0.06 | 0.06 | 12, 2, 5 | result-eligible | 200000 | 0.0745 | 0.0006 | 0.0756 | upper95 <= 0.06 **FAIL** | 0.215 | 0.180 |
+| 0.06 | 0.06 | 8, 1, 3 | not result-eligible (n_p = 1) | 200000 | 0.0428 | 0.0005 | 0.0437 | — (no pass/fail) | 0.126 | 0.107 |
+
+Diagnostic: FWER vs n_c/n_p (weight on s_seed^2 = 1/n_c − 1/n_p):
+
+| sigma_sub | sigma_seed | K, n_p, n_c | 1/n_c - 1/n_p | FWER | MC SE | upper95 |
+|---|---|---|---|---|---|---|
+| 0.00 | 0.03 | 8, 2, 2 | +0.000 | 0.0034 | 0.0001 | 0.0036 |
+| 0.00 | 0.03 | 12, 2, 2 | +0.000 | 0.0085 | 0.0002 | 0.0089 |
+| 0.00 | 0.03 | 8, 3, 3 | +0.000 | 0.0020 | 0.0001 | 0.0022 |
+| 0.00 | 0.03 | 8, 5, 5 | +0.000 | 0.0014 | 0.0001 | 0.0016 |
+| 0.00 | 0.03 | 8, 3, 2 | +0.167 | 0.0027 | 0.0001 | 0.0029 |
+| 0.00 | 0.03 | 8, 5, 3 | +0.133 | 0.0021 | 0.0001 | 0.0023 |
+| 0.00 | 0.03 | 12, 5, 3 | +0.133 | 0.0067 | 0.0002 | 0.0070 |
+| 0.00 | 0.06 | 8, 2, 2 | +0.000 | 0.0033 | 0.0001 | 0.0035 |
+| 0.00 | 0.06 | 12, 2, 2 | +0.000 | 0.0086 | 0.0002 | 0.0090 |
+| 0.00 | 0.06 | 8, 3, 3 | +0.000 | 0.0022 | 0.0001 | 0.0024 |
+| 0.00 | 0.06 | 8, 5, 5 | +0.000 | 0.0014 | 0.0001 | 0.0016 |
+| 0.00 | 0.06 | 8, 3, 2 | +0.167 | 0.0025 | 0.0001 | 0.0027 |
+| 0.00 | 0.06 | 8, 5, 3 | +0.133 | 0.0015 | 0.0001 | 0.0017 |
+| 0.00 | 0.06 | 12, 5, 3 | +0.133 | 0.0067 | 0.0002 | 0.0071 |
+| 0.02 | 0.03 | 8, 2, 2 | +0.000 | 0.0085 | 0.0002 | 0.0089 |
+| 0.02 | 0.03 | 12, 2, 2 | +0.000 | 0.0176 | 0.0003 | 0.0182 |
+| 0.02 | 0.03 | 8, 3, 3 | +0.000 | 0.0088 | 0.0002 | 0.0092 |
+| 0.02 | 0.03 | 8, 5, 5 | +0.000 | 0.0141 | 0.0003 | 0.0146 |
+| 0.02 | 0.03 | 8, 3, 2 | +0.167 | 0.0064 | 0.0002 | 0.0067 |
+| 0.02 | 0.03 | 8, 5, 3 | +0.133 | 0.0080 | 0.0002 | 0.0084 |
+| 0.02 | 0.03 | 12, 5, 3 | +0.133 | 0.0180 | 0.0003 | 0.0186 |
+| 0.02 | 0.06 | 8, 2, 2 | +0.000 | 0.0052 | 0.0002 | 0.0056 |
+| 0.02 | 0.06 | 12, 2, 2 | +0.000 | 0.0123 | 0.0002 | 0.0127 |
+| 0.02 | 0.06 | 8, 3, 3 | +0.000 | 0.0047 | 0.0002 | 0.0050 |
+| 0.02 | 0.06 | 8, 5, 5 | +0.000 | 0.0060 | 0.0002 | 0.0063 |
+| 0.02 | 0.06 | 8, 3, 2 | +0.167 | 0.0042 | 0.0001 | 0.0044 |
+| 0.02 | 0.06 | 8, 5, 3 | +0.133 | 0.0041 | 0.0001 | 0.0044 |
+| 0.02 | 0.06 | 12, 5, 3 | +0.133 | 0.0118 | 0.0002 | 0.0123 |
+| 0.04 | 0.03 | 8, 2, 2 | +0.000 | 0.0231 | 0.0003 | 0.0237 |
+| 0.04 | 0.03 | 12, 2, 2 | +0.000 | 0.0352 | 0.0004 | 0.0360 |
+| 0.04 | 0.03 | 8, 3, 3 | +0.000 | 0.0300 | 0.0004 | 0.0308 |
+| 0.04 | 0.03 | 8, 5, 5 | +0.000 | 0.0362 | 0.0004 | 0.0370 |
+| 0.04 | 0.03 | 8, 3, 2 | +0.167 | 0.0182 | 0.0003 | 0.0188 |
+| 0.04 | 0.03 | 8, 5, 3 | +0.133 | 0.0219 | 0.0003 | 0.0226 |
+| 0.04 | 0.03 | 12, 5, 3 | +0.133 | 0.0312 | 0.0004 | 0.0319 |
+| 0.04 | 0.06 | 8, 2, 2 | +0.000 | 0.0124 | 0.0002 | 0.0129 |
+| 0.04 | 0.06 | 12, 2, 2 | +0.000 | 0.0233 | 0.0003 | 0.0239 |
+| 0.04 | 0.06 | 8, 3, 3 | +0.000 | 0.0155 | 0.0003 | 0.0161 |
+| 0.04 | 0.06 | 8, 5, 5 | +0.000 | 0.0242 | 0.0003 | 0.0248 |
+| 0.04 | 0.06 | 8, 3, 2 | +0.167 | 0.0096 | 0.0002 | 0.0100 |
+| 0.04 | 0.06 | 8, 5, 3 | +0.133 | 0.0123 | 0.0002 | 0.0128 |
+| 0.04 | 0.06 | 12, 5, 3 | +0.133 | 0.0243 | 0.0003 | 0.0250 |
+| 0.06 | 0.03 | 8, 2, 2 | +0.000 | 0.0341 | 0.0004 | 0.0349 |
+| 0.06 | 0.03 | 12, 2, 2 | +0.000 | 0.0424 | 0.0005 | 0.0433 |
+| 0.06 | 0.03 | 8, 3, 3 | +0.000 | 0.0384 | 0.0004 | 0.0392 |
+| 0.06 | 0.03 | 8, 5, 5 | +0.000 | 0.0386 | 0.0004 | 0.0395 |
+| 0.06 | 0.03 | 8, 3, 2 | +0.167 | 0.0276 | 0.0004 | 0.0284 |
+| 0.06 | 0.03 | 8, 5, 3 | +0.133 | 0.0302 | 0.0004 | 0.0309 |
+| 0.06 | 0.03 | 12, 5, 3 | +0.133 | 0.0366 | 0.0004 | 0.0375 |
+| 0.06 | 0.06 | 8, 2, 2 | +0.000 | 0.0222 | 0.0003 | 0.0229 |
+| 0.06 | 0.06 | 12, 2, 2 | +0.000 | 0.0353 | 0.0004 | 0.0362 |
+| 0.06 | 0.06 | 8, 3, 3 | +0.000 | 0.0296 | 0.0004 | 0.0303 |
+| 0.06 | 0.06 | 8, 5, 5 | +0.000 | 0.0363 | 0.0004 | 0.0371 |
+| 0.06 | 0.06 | 8, 3, 2 | +0.167 | 0.0181 | 0.0003 | 0.0187 |
+| 0.06 | 0.06 | 8, 5, 3 | +0.133 | 0.0218 | 0.0003 | 0.0225 |
+| 0.06 | 0.06 | 12, 5, 3 | +0.133 | 0.0314 | 0.0004 | 0.0322 |
+
+- **B-003 (RESOLVED by D-024, which excludes n_p = 1 from result runs; superseded by B-004; 2026-11-19T06:18Z) — the D-019 test (df = K−1) misses the K >= 8 tier at n_p = 1.**
   Stop condition from the B-002 decision: "If any K >= 8 cell misses the 0.06 bound, STOP and report the table.
   Do not weaken the test. Next step in that case would be the parametric bootstrap."
   - *Symptom.* `test_primary_test_null_calibration` (slow, hard, two tiers) fails one cell:

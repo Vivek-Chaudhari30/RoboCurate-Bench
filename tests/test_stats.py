@@ -299,18 +299,30 @@ def test_design_runs():
 
 @pytest.mark.slow
 def test_primary_test_null_calibration():
-    """Hard two-tier null calibration of the primary test (D-016 + D-019), 7 null cleaners, 200 rollouts.
+    """Hard null calibration of the primary test (D-016 + D-019 + D-024), 7 null cleaners, 200 rollouts.
 
-    Tier 1: every cell FWER <= 0.07. Tier 2: K >= 8 cells, upper 95% Monte Carlo bound <= 0.06
-    (200 000 grids per K >= 8 cell, MC SE <= 0.0006). The table is printed with MC SEs (pytest -s).
+    Result-eligible cells (K >= 8, n_p >= 2; 200 000 grids each): upper 95% Monte Carlo bound <= 0.06.
+    K < 8 cells (calibration only): FWER <= 0.07. n_p = 1 cells are reported, labeled not result-eligible,
+    with no pass/fail (D-024). The table, with MC SEs, is printed (pytest -s).
     """
     from robocurate.report.simulate import grid, markdown
 
     cells = grid(power=False)
     print("\n" + markdown(cells))
-    tier1 = [c for c in cells if c.fwer > 0.07]
-    tier2 = [c for c in cells if c.K >= 8 and c.upper95 > 0.06]
-    assert not tier1 and not tier2, f"tier1 fails: {tier1}; tier2 fails: {tier2}"
+    assert any(c.eligible for c in cells) and any(c.verdict is None for c in cells)
+    fails = [c for c in cells if c.verdict == "FAIL"]
+    assert not fails, f"calibration fails: {fails}"
+
+
+def test_simulate_eligibility_labels():
+    from robocurate.report.simulate import Cell, markdown
+
+    cells = [Cell(0.04, 0.06, 8, 2, 3, 200_000, 0.055), Cell(0.04, 0.06, 8, 1, 3, 200_000, 0.0711),
+             Cell(0.04, 0.06, 4, 2, 3, 40_000, 0.05), Cell(0.04, 0.06, 12, 2, 5, 200_000, 0.0595)]
+    assert [c.verdict for c in cells] == ["ok", None, "ok", "FAIL"]
+    md = markdown(cells)
+    assert "not result-eligible (n_p = 1) | 200000 | 0.0711" in md and "no pass/fail" in md
+    assert md.count("result-eligible |") == 2 and "**FAIL**" in md
 
 
 def test_power_large_noncentrality_regression():

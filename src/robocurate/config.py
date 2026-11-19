@@ -23,6 +23,7 @@ SEED_FLOOR = 6  # D-015 (Welch + Holm needs >= 6 runs per condition to hold the 
 
 MIN_WEIGHT_PERMUTATIONS = 8  # D-020
 RESULT_MIN_SUBSETS = 8  # D-019: result-mode runs need K >= 8 random subsets per budget
+RESULT_MIN_PLACEBO_SEEDS = 2  # D-024: result-mode runs need n_p >= 2 seeds per placebo subset / permutation
 CALIBRATION_SEED_SPAN = 100_000  # calibration_seed_start .. +SPAN is reserved for calibration evals (D-017)
 
 Mode = Literal["result", "calibration", "fake", "plan"]

@@ -73,6 +73,56 @@ def test_check_result_subsets_unit(tmp_path):
             check_result_subsets(grid(k))
 
 
+def _k8_cfg(tmp_path, weighting=False):
+    from helpers import PROTOCOL
+
+    proto = PROTOCOL.replace("[2000, 2001, 2002]", str(list(range(2000, 2008))))
+    if weighting:
+        proto += "weight_permutation_seeds: [3000, 3001, 3002, 3003, 3004, 3005, 3006, 3007]\n"
+    cfg = write_configs(tmp_path / f"cfg{int(weighting)}", protocol=proto)
+    g = cfg["grid"].read_text().replace("n_subsets: 3", "n_subsets: 8")
+    if weighting:
+        g += "  - {kind: weighting, name: rabc, version: \"1\", n_permutations: 8}\n"
+    cfg["grid"].write_text(g)
+    return cfg
+
+
+def test_check_result_placebo_seeds_unit(tmp_path):
+    """D-024: n_p = seeds per placebo subset (and per weight permutation) must be >= 2 in result mode."""
+    from robocurate.config import ConfigError
+    from robocurate.runs.planner import check_result_placebo_seeds, make_plan, placebo_seed_counts
+
+    grid = str(_k8_cfg(tmp_path)["grid"])
+    for seeds in ([0, 1], [0, 1, 2]):
+        plan = make_plan(grid, train_seeds_override=seeds)
+        check_result_placebo_seeds(plan)
+        assert set(placebo_seed_counts(plan).values()) == {len(seeds)} and len(placebo_seed_counts(plan)) == 8
+    with pytest.raises(ConfigError, match="D-024"):
+        check_result_placebo_seeds(make_plan(grid, train_seeds_override=[0]))
+    wgrid = str(_k8_cfg(tmp_path, weighting=True)["grid"])  # weighting track: n_p per weight permutation
+    plan = make_plan(wgrid, train_seeds_override=[0])
+    assert sum(1 for k in placebo_seed_counts(plan) if k[0].startswith("weight_placebo")) == 8
+    with pytest.raises(ConfigError, match="D-024"):
+        check_result_placebo_seeds(plan)
+    check_result_placebo_seeds(make_plan(wgrid, train_seeds_override=[0, 1]))
+
+
+def test_result_mode_guard_refuses_np_below_2(tmp_path):
+    """D-024 is wired into the result-mode guard, after the K check and before the FROZEN / TBD checks.
+
+    (A protocol cannot currently declare < 6 train seeds: the loader keeps the D-015 floor, so the guard is
+    exercised on a plan whose seeds are overridden.)"""
+    from robocurate.config import ConfigError
+    from robocurate.runs.planner import make_plan
+
+    grid = str(_k8_cfg(tmp_path)["grid"])
+    with pytest.raises(ConfigError, match=r"D-024.*|n_p = 1"):
+        cli._result_mode_guard(make_plan(grid, train_seeds_override=[0]))
+    with pytest.raises(ConfigError) as e:  # n_p = 2 passes D-024, then hits FROZEN / TBD
+        cli._result_mode_guard(make_plan(grid, train_seeds_override=[0, 1]))
+    assert "D-024" not in str(e.value) and ("FROZEN" in str(e.value) or "TBD" in str(e.value))
+
+
 def test_local_backend_refuses_on_cpu(scratch_env, monkeypatch, capsys):
     monkeypatch.setenv("CUDA_VISIBLE_DEVICES", "")
     cal = str(REPO / "configs/calibration/m0_act_transfer_cube_human.yaml")
