@@ -125,10 +125,11 @@ class DatasetView:
         return h.hexdigest()
 
 
-def synthetic_view(n_episodes: int = 40, seed: int = 0, fps: int = 50) -> DatasetView:
+def synthetic_view(n_episodes: int = 40, seed: int = 0, fps: int = 50, tie_break_salt: str = "") -> DatasetView:
     """Small synthetic dataset for conformance checks and tests (no LeRobot)."""
     rng = np.random.default_rng(seed)
     lengths = rng.integers(200, 500, size=n_episodes)
     acts = [rng.normal(size=(int(L), 14)).astype(np.float32) for L in lengths]
     sts = [np.cumsum(a, axis=0) * 0.01 for a in acts]
-    return DatasetView.from_arrays(acts, sts, ["Transfer the cube."] * n_episodes, fps, name="synthetic")
+    return DatasetView.from_arrays(acts, sts, ["Transfer the cube."] * n_episodes, fps, name="synthetic",
+                                   tie_break_salt=tie_break_salt)

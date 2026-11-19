@@ -91,7 +91,12 @@ def _setup(tmp_path, **kw):
     cfg = write_configs(tmp_path / "cfg", **kw)
     params = load_fake_params(cfg["fake"])
     plan = make_plan(str(cfg["grid"]), mode="fake", train_seeds_override=params.train_seeds)
-    return plan, FakeBackend(plan, params, command_line=["pytest"])
+    from robocurate.curation import prepare as P
+
+    sel = tmp_path / "sel"
+    view = P.fake_view(plan.protocol)
+    P.prepare_plan(plan, view, sel, "fake", P.fake_context_factory(plan.protocol, view, sel))
+    return plan, FakeBackend(plan, params, command_line=["pytest"], selections_dir=sel)
 
 
 def test_fake_deterministic_from_run_id(tmp_path):

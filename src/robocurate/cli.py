@@ -46,6 +46,40 @@ def _result_mode_guard(plan) -> None:
         raise ConfigError(f"result mode refused: TBD values remain: {', '.join(missing)}")
 
 
+def _selections_dir(args, plan, backend: str) -> Path:
+    if getattr(args, "selections_dir", None):
+        return Path(args.selections_dir)
+    from robocurate.paths import scratch_dir
+
+    return scratch_dir("selections", create=False) / f"{plan.grid.name}-{backend}"
+
+
+def cmd_prepare(args) -> int:
+    """D-022: compute + cache selections / weighting progress once per (task, budget, replicate, entrant)."""
+    from robocurate.curation import prepare as P
+    from robocurate.paths import require_storage_env
+
+    require_storage_env()
+    plan = _make_plan(args.config, "fake" if args.backend == "fake" else "plan")
+    out = _selections_dir(args, plan, args.backend)
+    if args.backend == "fake":
+        view = P.fake_view(plan.protocol)
+        factory = P.fake_context_factory(plan.protocol, view, out)
+    else:
+        raise ConfigError("prepare --backend local needs the mixture dataset, Robometer weights and (for "
+                          "reference-policy entrants) the M0 full-data checkpoint; not available in this milestone")
+    recs = P.prepare_plan(plan, view, out, args.backend, factory, replicate=args.replicate)
+    for r in recs:
+        c = r["cleaner"]
+        what = (f"{len(r['selected_episodes'])} episodes" if "selected_episodes" in r
+                else f"progress + {len(r['placebo_parquets'])} permutation parquets")
+        print(f"{c['name']} v{c['version']} [{c['track']}] budget {r['inputs']['budget']}: {what}; "
+              f"{'cached' if r['_cached'] else 'computed'} in {r['wall_clock_s']:.2f}s, GPU-h {r['gpu_h']:.3f}, "
+              f"rollouts {r['rollouts_used']}, key {r['key'][:12]}")
+    print(f"selections -> {out}")
+    return 0
+
+
 def cmd_run(args) -> int:
     from robocurate.paths import require_storage_env
     from robocurate.runs import executor
@@ -61,7 +95,8 @@ def cmd_run(args) -> int:
             raise ConfigError("--backend fake requires --fake-params")
         params = load_fake_params(args.fake_params)
         plan = _make_plan(args.config, "fake", None if is_cal else params.train_seeds)
-        backend = FakeBackend(plan, params, command_line=[Path(sys.argv[0]).name, *sys.argv[1:]])
+        backend = FakeBackend(plan, params, command_line=[Path(sys.argv[0]).name, *sys.argv[1:]],
+                              selections_dir=_selections_dir(args, plan, "fake"), replicate=args.replicate)
     else:
         if args.fake_params:
             raise ConfigError("--fake-params is only valid with --backend fake")
@@ -78,7 +113,8 @@ def cmd_run(args) -> int:
             from robocurate.paths import scratch_dir
 
             root = scratch_dir("datasets", create=False) / dataset
-        backend = LocalBackend(plan, mode, dataset, root, command_line=[Path(sys.argv[0]).name, *sys.argv[1:]])
+        backend = LocalBackend(plan, mode, dataset, root, command_line=[Path(sys.argv[0]).name, *sys.argv[1:]],
+                               selections_dir=_selections_dir(args, plan, "local"), replicate=args.replicate)
 
     scratch = require_storage_env()
     out = Path(args.results_dir) if args.results_dir else scratch / "results" / f"{plan.grid.name}-{args.backend}"
@@ -146,6 +182,13 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("config")
     p.set_defaults(fn=cmd_plan)
 
+    p = sub.add_parser("prepare", help="compute + cache entrant selections / weights once (D-022)")
+    p.add_argument("config")
+    p.add_argument("--backend", choices=["fake", "local"], required=True)
+    p.add_argument("--selections-dir", help="default: $ROBOCURATE_SCRATCH/selections/<grid>-<backend>")
+    p.add_argument("--replicate", type=int, default=0, help="mixture replicate index")
+    p.set_defaults(fn=cmd_prepare)
+
     p = sub.add_parser("run", help="execute a grid (idempotent, restart-safe)")
     p.add_argument("config")
     p.add_argument("--backend", choices=["fake", "local"], required=True)
@@ -153,6 +196,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--fake-params", help="fake backend parameters YAML (fake only)")
     p.add_argument("--results-dir", help="default: $ROBOCURATE_SCRATCH/results/<name>-<backend>")
     p.add_argument("--dataset-root", help="local root of the training dataset (local backend)")
+    p.add_argument("--selections-dir", help="prepare cache (default: $ROBOCURATE_SCRATCH/selections/<grid>-<backend>)")
+    p.add_argument("--replicate", type=int, default=0, help="mixture replicate index")
     p.set_defaults(fn=cmd_run)
 
     p = sub.add_parser("report", help="report.md + leaderboard.json + plot from results JSONs")
@@ -173,12 +218,13 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     os.environ.setdefault("PYTHONNOUSERSITE", "1")
     args = build_parser().parse_args(argv)
+    from robocurate.curation.prepare import PrepareError
     from robocurate.paths import StorageError
     from robocurate.runs.backends.local import LocalBackendRefused
 
     try:
         return args.fn(args)
-    except (ConfigError, StorageError, LocalBackendRefused) as e:
+    except (ConfigError, StorageError, LocalBackendRefused, PrepareError) as e:
         print(f"error: {e}", file=sys.stderr)
         return 2
 

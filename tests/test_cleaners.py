@@ -139,7 +139,7 @@ def test_conformance_passes(target, tmp_path):
         ("label_import.py", "static"),
         ("oracle_import.py", "static"),
         ("dynamic_import.py", "static"),
-        ("too_many_rollouts.py", "rollouts"),
+        ("too_many_rollouts.py", "resources"),
     ],
 )
 def test_conformance_fails_broken(fixture, failing):

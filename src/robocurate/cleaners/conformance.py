@@ -5,13 +5,20 @@ Checks (all must pass):
                  robocurate.runs.oracle (transitively through robocurate's own modules), and uses no dynamic
                  import / exec / eval. Run BEFORE the module is imported.
   2. loads       the module imports and yields exactly one Cleaner with non-empty name and version.
-  3. rollouts    requires_rollouts <= CURATION_ROLLOUT_CAP (D-007).
+  3. resources   D-022 declarations are valid (track, requires_rollouts <= protocol.max_curation_rollouts <= 100,
+                 requires_reference_policy / requires_gpu bools, implementation tag).
+  Selection track (select):
   4. count       select() returns exactly `budget` ids.
   5. unique      ... with no duplicates.
   6. valid       ... all of which are episode indices of the view (ints).
-  7. determinism two calls with identically seeded Generators return identical ids.
+  Weighting track (frame_progress, D-020):
+  4-6. progress  one finite value in [0, 1] per frame of every episode.
+  7. determinism two calls with identically seeded Generators (and fresh fake contexts) return identical output.
   8. runtime     each select() call finishes within the time limit.
   9. no-leak     no forbidden module appears in sys.modules after running the cleaner.
+Cleaners that declare resources run with a FAKE curation context (curation/prepare.py): synthetic rollouts on
+curation seeds under the declared cap, a small BC reference policy, and a mock progress model. Conformance
+checks the contract, not the method's quality.
 On a pass, writes a selection JSON for the conformance view.
 """
 
@@ -35,7 +42,7 @@ from typing import Any
 import numpy as np
 
 from robocurate.cleaners import importguard, registry
-from robocurate.cleaners.base import CURATION_ROLLOUT_CAP, Cleaner
+from robocurate.cleaners.base import Cleaner, WeightingCleaner, validate_resources
 from robocurate.data.episodes import DatasetView, synthetic_view
 
 CONFORMANCE_SEED = 12345
@@ -54,6 +61,7 @@ class ConformanceReport:
     checks: list[Check] = field(default_factory=list)
     cleaner: Cleaner | None = None
     selection: list[int] | None = None
+    progress: dict[int, list[float]] | None = None  # weighting track
 
     @property
     def passed(self) -> bool:
@@ -168,49 +176,78 @@ def check(
     rep.cleaner = cleaner
     rep.add("loads", True, f"{cleaner.name} v{cleaner.version}")
 
-    # 3. rollouts cap
-    rep.add(
-        "rollouts",
-        isinstance(cleaner.requires_rollouts, int) and 0 <= cleaner.requires_rollouts <= CURATION_ROLLOUT_CAP,
-        f"requires_rollouts={cleaner.requires_rollouts} (cap {CURATION_ROLLOUT_CAP})",
-    )
+    # 3. resources (D-022)
+    protocol = _protocol()
+    problems = validate_resources(cleaner, protocol.max_curation_rollouts)
+    if not rep.add("resources", not problems, "; ".join(problems) or str(cleaner.resources())):
+        return rep
+    weighting = isinstance(cleaner, WeightingCleaner)
 
-    # run twice with identically seeded generators
-    outs: list[list[int]] = []
+    import tempfile
+
+    from robocurate.curation.prepare import fake_context_factory
+
+    ctx_dir = Path(tempfile.mkdtemp(prefix="rcb-conformance-"))
+
+    # run twice with identically seeded generators and fresh fake contexts
+    outs: list[Any] = []
     for _ in range(2):
+        cleaner.context = fake_context_factory(protocol, view, ctx_dir)(cleaner)
         t0 = time.time()
         try:
-            ids = _call_with_timeout(
-                lambda: cleaner.select(view, budget, np.random.default_rng(seed)), time_limit_s
-            )
+            fn = (lambda: cleaner.frame_progress(view, np.random.default_rng(seed))) if weighting else \
+                (lambda: cleaner.select(view, budget, np.random.default_rng(seed)))
+            res = _call_with_timeout(fn, time_limit_s)
         except _Timeout:
             rep.add("runtime", False, f"exceeded {time_limit_s}s")
             return rep
         except Exception as e:  # noqa: BLE001
-            rep.add("select", False, f"{type(e).__name__}: {e}")
+            rep.add("frame_progress" if weighting else "select", False, f"{type(e).__name__}: {e}")
             return rep
+        finally:
+            cleaner.context = None
         dt = time.time() - t0
         if dt > time_limit_s:
             rep.add("runtime", False, f"{dt:.1f}s > {time_limit_s}s")
             return rep
-        outs.append(list(ids))
+        outs.append(res)
     a, b = outs
-    valid_ids = set(view.episode_indices)
     rep.add("runtime", True, f"limit {time_limit_s}s")
-    rep.add("count", len(a) == budget, f"returned {len(a)}, budget {budget}")
-    rep.add("unique", len(set(a)) == len(a), f"{len(a) - len(set(a))} duplicates")
-    ints = all(isinstance(i, (int, np.integer)) and not isinstance(i, bool) for i in a)
-    rep.add("valid", ints and set(a) <= valid_ids, "ids must be episode indices of the view")
-    rep.add("determinism", a == b, "same rng seed must give the same ids")
+    if weighting:
+        lens = view.lengths()
+        shape_ok = isinstance(a, dict) and set(a) == set(lens) and all(len(a[i]) == lens[i] for i in lens)
+        rep.add("progress", shape_ok and all(np.all(np.isfinite(np.asarray(a[i]))) and
+                                             np.min(a[i]) >= 0 and np.max(a[i]) <= 1 for i in lens),
+                "one finite value in [0, 1] per frame of every episode")
+        rep.add("determinism", shape_ok and all(np.array_equal(np.asarray(a[i]), np.asarray(b[i])) for i in lens),
+                "same rng seed must give the same progress")
+    else:
+        a, b = list(a), list(b)
+        valid_ids = set(view.episode_indices)
+        rep.add("count", len(a) == budget, f"returned {len(a)}, budget {budget}")
+        rep.add("unique", len(set(a)) == len(a), f"{len(a) - len(set(a))} duplicates")
+        ints = all(isinstance(i, (int, np.integer)) and not isinstance(i, bool) for i in a)
+        rep.add("valid", ints and set(a) <= valid_ids, "ids must be episode indices of the view")
+        rep.add("determinism", a == b, "same rng seed must give the same ids")
     leaked = {m for m in sys.modules if importguard._is_forbidden(m)} - already
     rep.add("no-leak", not leaked, ", ".join(sorted(leaked)))
     if rep.passed:
-        rep.selection = sorted(int(i) for i in a)
+        if weighting:
+            rep.progress = {int(i): [float(x) for x in a[i]] for i in a}
+        else:
+            rep.selection = sorted(int(i) for i in a)
     return rep
 
 
+def _protocol():
+    from robocurate.config import load_protocol
+    from robocurate.paths import repo_root
+
+    return load_protocol(repo_root() / "configs/protocol.yaml")
+
+
 def write_selection(rep: ConformanceReport, view: DatasetView, out: str | Path, budget_fraction: float) -> Path:
-    if not rep.passed or rep.cleaner is None or rep.selection is None:
+    if not rep.passed or rep.cleaner is None or (rep.selection is None and rep.progress is None):
         raise ValueError("refusing to write a selection for a failed conformance check")
     from robocurate.results import git_info
 
@@ -224,7 +261,11 @@ def write_selection(rep: ConformanceReport, view: DatasetView, out: str | Path, 
         "dataset_fingerprint": view.fingerprint(),
         "n_episodes": view.n_episodes,
         "budget_fraction": budget_fraction,
-        "budget": len(rep.selection),
+        "budget": len(rep.selection) if rep.selection is not None else None,
+        "track": rep.cleaner.track,
+        "resources": rep.cleaner.resources(),
+        "progress_mean_final": (float(np.mean([v[-1] for v in rep.progress.values()]))
+                                if rep.progress is not None else None),
         "rng_seed": CONFORMANCE_SEED,
         "selected_episode_indices": rep.selection,
         "git": {"hash": g.hash, "dirty": g.dirty},

@@ -6,18 +6,18 @@ empty, so it cannot start by accident while CPU-only rules are in force.
 Per run:
   1. Selection on a label-free DatasetView (budget = round-half-up(fraction * n_episodes)):
      full -> all; random -> RandomSubset with rng seeded by protocol.random_subset_seeds[subset_index];
-     cleaner -> registry cleaner with rng seeded by selection_seed(task, name, version, budget) -- the SAME
-     subset for every train seed (seeds replicate training, not selection); oracle -> runs.oracle (labels).
+     cleaner -> the selection cached by `robocurate prepare` (D-022; the cleaner is never called inside a run,
+     so every train seed uses the SAME subset); weighting / weight_placebo -> all episodes, trained with
+     LeRobot's RA-BC sample weighting on the prepared (or permuted, D-020) progress parquet;
+     oracle -> runs.oracle (labels).
   2. Materialize the subset with subset-only stats (data/subset.py, D-013).
   3. lerobot-train (train/lerobot_train.py), peak GPU memory polled via nvidia-smi.
   4. lerobot-eval on the FINAL checkpoint only (D-003) with protocol eval seeds; parse per-episode success.
   5. Return a results record (kind "result" or "calibration").
-Cleaners with requires_rollouts > 0 are not supported yet (next milestone).
 """
 
 from __future__ import annotations
 
-import hashlib
 import os
 import subprocess
 import sys
@@ -28,7 +28,6 @@ from typing import Any
 import numpy as np
 
 from robocurate import results
-from robocurate.cleaners import registry
 from robocurate.cleaners.base import budget_count
 from robocurate.cleaners.builtin import RandomSubset
 from robocurate.config import ConfigError, is_tbd
@@ -43,9 +42,7 @@ class LocalBackendRefused(RuntimeError):
     pass
 
 
-def selection_seed(task: str, name: str, version: str, budget: float) -> int:
-    h = hashlib.sha256(f"{task}|{name}|{version}|{budget}".encode()).hexdigest()
-    return int(h[:8], 16)
+from robocurate.curation.prepare import selection_seed  # noqa: E402,F401  (re-exported; defined with prepare)
 
 
 def require_gpu_env(env: dict[str, str] | None = None) -> None:
@@ -61,7 +58,8 @@ class LocalBackend:
     name = "local"
 
     def __init__(self, plan: Plan, kind: str, dataset_repo_id: str, dataset_root: str | Path | None,
-                 command_line: list[str] | None = None, device: str = "cuda"):
+                 command_line: list[str] | None = None, device: str = "cuda",
+                 selections_dir: str | Path | None = None, replicate: int = 0):
         require_gpu_env()
         require_storage_env()
         if kind not in ("result", "calibration"):
@@ -72,6 +70,8 @@ class LocalBackend:
         self.root = Path(dataset_root) if dataset_root else None  # None -> HF cache (Hub dataset)
         self.device = device
         self.command_line = command_line or list(sys.argv)
+        self.selections_dir = Path(selections_dir) if selections_dir else scratch_dir("selections", create=False)
+        self.replicate = replicate
         self._view = None
         steps = plan.steps
         if is_tbd(steps):
@@ -96,17 +96,15 @@ class LocalBackend:
         v = self.view
         k = budget_count(v.n_episodes, spec.budget)
         c = spec.condition
-        if c.kind == "full":
+        if c.kind in ("full", "weighting", "weight_placebo"):
             return v.episode_indices
         if c.kind == "random":
             return RandomSubset().select(v, k, np.random.default_rng(self.plan.subset_seed(spec)))
-        if c.kind == "cleaner":
-            cl = registry.get(c.name, c.version)
-            if cl.requires_rollouts:
-                raise NotImplementedError("rollout-based cleaners are out of scope for this milestone")
-            ids = cl.select(v, k, np.random.default_rng(selection_seed(spec.task, c.name, c.version, spec.budget)))
-            if len(ids) != k or len(set(ids)) != k or not set(ids) <= set(v.episode_indices):
-                raise RuntimeError(f"cleaner {c.name} violated the selection contract")
+        if c.kind == "cleaner":  # D-022: consume the prepared selection only
+            rec = self.record(spec)
+            ids = rec["selected_episodes"]
+            if len(ids) != k:
+                raise RuntimeError(f"prepared selection for {c.name} has {len(ids)} ids, budget is {k}")
             return sorted(int(i) for i in ids)
         if c.kind == "oracle":
             from robocurate.data.labels import load_labels, sidecar_path
@@ -116,6 +114,23 @@ class LocalBackend:
                 raise ConfigError("oracle needs a local mixture dataset root (labels sidecar)")
             return oracle_select(load_labels(sidecar_path(self.root)), k, v.episode_indices)
         raise ValueError(c.kind)
+
+    def record(self, spec: RunSpec) -> dict:
+        from robocurate.curation.prepare import load_record
+
+        c = spec.condition
+        kind = "weighting" if c.kind in ("weighting", "weight_placebo") else c.kind
+        return load_record(self.selections_dir, spec.task, kind, c.name, c.version, spec.budget, self.view,
+                           self.replicate)
+
+    def progress_parquet(self, spec: RunSpec) -> Path | None:
+        """RA-BC progress parquet for weighting-track runs (permuted for the D-020 placebo)."""
+        c = spec.condition
+        if c.kind == "weighting":
+            return Path(self.record(spec)["progress_parquet"])
+        if c.kind == "weight_placebo":
+            return Path(self.record(spec)["placebo_parquets"][str(spec.subset_index)])
+        return None
 
     def _run(self, cmd: list[str], log: Path) -> float | None:
         log.parent.mkdir(parents=True, exist_ok=True)
@@ -150,7 +165,8 @@ class LocalBackend:
                 raise ConfigError("calibration intermediate_save_freq is TBD")
             save_freq = int(sf)
         train_cmd = build_train_cmd(self.plan.task, spec, sub, run_dir / "train", save_freq=save_freq,
-                                    steps=self.steps, device=self.device)
+                                    steps=self.steps, device=self.device,
+                                    sample_weighting_progress=self.progress_parquet(spec))
         peak_train = self._run(train_cmd, run_dir / "train.log")
         ckpt = final_checkpoint(run_dir / "train", self.steps)
         n = p.n_eval_rollouts

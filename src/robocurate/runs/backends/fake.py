@@ -4,7 +4,8 @@
     success ~ Bernoulli(p_run), n_rollouts times
 
 All randomness is seeded from run_id, so reruns reproduce identical records. Writes kind="fake".
-No LeRobot, no data, no GPU.
+No LeRobot, no data, no GPU. Cleaner and weighting-track runs must find their prepared record in the selection
+cache (D-022, computed on curation.prepare.fake_view); the record key is stored in the result.
 """
 
 from __future__ import annotations
@@ -54,8 +55,12 @@ class FakeBackend:
     name = "fake"
     kind = "fake"
 
-    def __init__(self, plan: Plan, params: FakeParams, command_line: list[str] | None = None):
+    def __init__(self, plan: Plan, params: FakeParams, command_line: list[str] | None = None,
+                 selections_dir: str | Path | None = None, replicate: int = 0):
         self.plan = plan
+        self.selections_dir = Path(selections_dir) if selections_dir else None
+        self.replicate = replicate
+        self._records: dict[tuple, dict] = {}
         self.params = params
         self.command_line = command_line or list(sys.argv)
         self.n_rollouts = plan.protocol.n_eval_rollouts
@@ -71,8 +76,24 @@ class FakeBackend:
     def gpu_check(self) -> None:  # fake backend never touches a GPU
         return None
 
+    def prepared(self, spec: RunSpec) -> dict | None:
+        c = spec.condition
+        if c.kind not in ("cleaner", "weighting", "weight_placebo"):
+            return None
+        from robocurate.curation.prepare import PrepareError, fake_view, load_record
+
+        if self.selections_dir is None:
+            raise PrepareError("cleaner/weighting runs need a selection cache (--selections-dir); run prepare")
+        kind = "cleaner" if c.kind == "cleaner" else "weighting"
+        k = (kind, c.name, c.version, spec.budget)
+        if k not in self._records:
+            self._records[k] = load_record(self.selections_dir, spec.task, kind, c.name, c.version, spec.budget,
+                                           fake_view(self.plan.protocol), self.replicate)
+        return self._records[k]
+
     def run(self, spec: RunSpec, rid: str) -> dict[str, Any]:
         t0 = time.time()
+        rec = self.prepared(spec)
         rng = np.random.default_rng(int(rid, 16))
         eff = self.params.effect(spec.condition.label)
         p = float(np.clip(self.params.base + eff + rng.normal(0.0, self.params.sigma_seed), 0.0, 1.0))
@@ -108,5 +129,7 @@ class FakeBackend:
             wall_clock_s=time.time() - t0,
             peak_gpu_mem_mb=None,
             hostname=results.hostname(),
-            extra={"FAKE": True, "fake_true_rate": p},
+            extra={"FAKE": True, "fake_true_rate": p,
+                   **({"selection_key": rec["key"], "curation_gpu_h": rec["gpu_h"],
+                       "selected_episodes": rec.get("selected_episodes")} if rec else {})},
         ).to_dict()

@@ -17,6 +17,15 @@ Flags emitted and where they are defined (TrainPipelineConfig, configs/train.py 
   --output_dir                         :86    (must not exist unless resuming, configs/train.py:259)
   --job_name                           :87
   --wandb.enable=false                 WandBConfig, configs/default.py:82
+Weighting track ONLY (D-020; condition kind weighting / weight_placebo):
+  --sample_weighting.type=rabc         TrainPipelineConfig.sample_weighting: SampleWeightingConfig | None
+                                       (configs/train.py:139; utils/sample_weighting.py:76-100), built by
+                                       make_sample_weighter (utils/sample_weighting.py:103-132) at
+                                       scripts/lerobot_train.py:406-418; weighted loss sum(w*l)/sum(w) at :162
+  --sample_weighting.progress_path     per-frame progress parquet (rewards/sarm/rabc.py:101-126)
+  --sample_weighting.head_mode=sparse  reads column progress_sparse (rabc.py:101); kappa/epsilon stay at
+                                       LeRobot's defaults 0.01 / 1e-6 (sample_weighting.py:97-98)
+Non-weighting conditions emit exactly the pre-weighting command (golden test).
 Final checkpoint: <output_dir>/checkpoints/<step:0Nd>/pretrained_model, N = max(6, len(str(steps)))
 (common/train_utils.py:44-52, utils/constants.py:47-49).
 
@@ -57,8 +66,14 @@ def build_train_cmd(
     save_freq: int | None = None,
     steps: int | None = None,
     device: str = "cuda",
+    sample_weighting_progress: str | Path | None = None,
 ) -> list[str]:
-    """`steps` overrides task.steps (calibration configs carry their own); `save_freq` defaults to steps."""
+    """`steps` overrides task.steps (calibration configs carry their own); `save_freq` defaults to steps.
+
+    `sample_weighting_progress` is required for weighting-track conditions and forbidden for all others."""
+    weighting = spec.condition.kind in ("weighting", "weight_placebo")
+    if weighting != (sample_weighting_progress is not None):
+        raise ConfigError("sample weighting is set iff the condition is weighting-track (D-020)")
     steps = int(_num(task_cfg, "steps")) if steps is None else int(steps)
     batch_size = int(_num(task_cfg, "batch_size"))
     if save_freq is None:
@@ -69,7 +84,7 @@ def build_train_cmd(
     out_dir = Path(out_dir)
     if out_dir.exists():
         raise FileExistsError(f"{out_dir} exists; lerobot-train refuses existing output dirs (train.py:259)")
-    return [
+    cmd = [
         TRAIN_BIN,
         f"--dataset.repo_id={subset.repo_id}",
         f"--dataset.root={subset.root}",
@@ -86,6 +101,10 @@ def build_train_cmd(
         f"--job_name={out_dir.name}",
         "--wandb.enable=false",
     ]
+    if weighting:
+        cmd += ["--sample_weighting.type=rabc", f"--sample_weighting.progress_path={sample_weighting_progress}",
+                "--sample_weighting.head_mode=sparse"]
+    return cmd
 
 
 def step_identifier(step: int, total_steps: int) -> str:

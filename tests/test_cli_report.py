@@ -86,10 +86,19 @@ def test_fake_requires_params(scratch_env, capsys):
 
 def _fake_e2e(tmp_path, scratch_env, **kw):
     cfg = write_configs(tmp_path / "cfg", **kw)
-    out = tmp_path / "res"
+    out, sel = tmp_path / "res", tmp_path / "sel"
+    assert cli.main(["prepare", str(cfg["grid"]), "--backend", "fake", "--selections-dir", str(sel)]) == 0
     assert cli.main(["run", str(cfg["grid"]), "--backend", "fake", "--fake-params", str(cfg["fake"]),
-                     "--results-dir", str(out)]) == 0
+                     "--results-dir", str(out), "--selections-dir", str(sel)]) == 0
     return out
+
+
+def test_fake_run_refuses_without_prepare(tmp_path, scratch_env, capsys):
+    """D-022: runs consume selections only from the prepare cache."""
+    cfg = write_configs(tmp_path / "cfg")
+    rc = cli.main(["run", str(cfg["grid"]), "--backend", "fake", "--fake-params", str(cfg["fake"]),
+                   "--results-dir", str(tmp_path / "res"), "--selections-dir", str(tmp_path / "empty")])
+    assert rc == 2 and "robocurate prepare" in capsys.readouterr().err
 
 
 def test_fake_e2e_report_recovers_known_effects(tmp_path, scratch_env, capsys):
