@@ -179,3 +179,47 @@ def test_fake_missing_effect_errors(tmp_path):
     with pytest.raises(ConfigError):
         executor.execute([s for s in plan.specs() if s.condition.kind == "oracle"][:1], be, tmp_path / "r",
                          log=lambda m: None)
+
+
+def _mock_local_backend(monkeypatch, tmp_path, kind):
+    """A LocalBackend whose subprocesses, subset materialization and eval parsing are mocked (no GPU, no LeRobot)."""
+    import types
+
+    import robocurate.data.subset as subset_mod
+    import robocurate.eval.lerobot_eval as ev
+    import robocurate.train.lerobot_train as tr
+    from robocurate.runs.backends import local as L
+
+    protocol = types.SimpleNamespace(eval_seed_start=100000, calibration_seed_start=300000, n_eval_rollouts=200,
+                                     path=tmp_path / "p.yaml", sha256="0" * 64)
+    task = types.SimpleNamespace(env_type="aloha", env_task="AlohaTransferCube-v0", path=tmp_path / "t.yaml",
+                                 sha256="1" * 64, raw=lambda k: {"eval_batch_size": 50}[k])
+    grid_vals = {"intermediate_save_freq": 500, "n_final_rollouts": 200, "n_intermediate_rollouts": 50}
+    grid = types.SimpleNamespace(path=tmp_path / "g.yaml", sha256="2" * 64, raw=lambda k: grid_vals[k])
+    plan = types.SimpleNamespace(protocol=protocol, task=task, grid=grid, kind=kind, subset_seed=lambda spec: None)
+    be = L.LocalBackend.__new__(L.LocalBackend)
+    be.plan, be.kind, be.steps, be.device, be.command_line = plan, kind, 1000, "cuda", ["robocurate"]
+    be.repo_id, be.root, be._view = "x/y", None, types.SimpleNamespace(episode_indices=[0, 1, 2], n_episodes=3)
+    cmds = []
+    monkeypatch.setattr(L, "scratch_dir", lambda *a, **k: tmp_path / "run")
+    monkeypatch.setattr(subset_mod, "materialize_subset", lambda *a, **k: tmp_path / "sub")
+    monkeypatch.setattr(tr, "build_train_cmd", lambda *a, **k: ["lerobot-train"])
+    monkeypatch.setattr(tr, "final_checkpoint", lambda *a, **k: tmp_path / "pretrained_model")
+    monkeypatch.setattr(tr, "checkpoint_dir", lambda d, step, total: tmp_path / f"{step}" / "pretrained_model")
+    monkeypatch.setattr(ev, "parse_eval_info", lambda out, n: [True] * n)
+    monkeypatch.setattr(be, "_run", lambda cmd, log: cmds.append(cmd))
+    return be, cmds
+
+
+@pytest.mark.parametrize("kind,seed0", [("calibration", 300000), ("result", 100000)])
+def test_local_backend_eval_seed_block(monkeypatch, tmp_path, kind, seed0):
+    """Regression: calibration runs evaluated on protocol EVAL seeds (D-017 / CLAUDE.md rule 10 violation)."""
+    from robocurate.runs.spec import Condition, RunSpec
+
+    be, cmds = _mock_local_backend(monkeypatch, tmp_path, kind)
+    rec = be.run(RunSpec("aloha_transfer_cube", Condition.full(), 1.0, None, 0), "rid")
+    evals = [c for c in cmds if c[0] == "lerobot-eval"]
+    assert evals and all(f"--seed={seed0}" in c for c in evals)
+    assert len(evals) == (2 if kind == "calibration" else 1)  # 1000 steps, save every 500 -> one intermediate
+    assert rec["seeds"]["eval_seed_start"] == seed0
+    assert rec["seeds"]["seed_block"] == ("calibration" if kind == "calibration" else "eval")

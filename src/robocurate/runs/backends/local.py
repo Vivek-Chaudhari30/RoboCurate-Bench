@@ -138,6 +138,21 @@ class LocalBackend:
             return Path(perms[key])
         return None
 
+    def eval_seed_start(self) -> int:
+        """Env-seed start for this plan's evals: protocol eval seeds for result runs, calibration_seed_start for
+        calibration runs (D-017, CLAUDE.md rule 10). Calibration never touches eval seeds."""
+        p = self.plan.protocol
+        if self.plan.kind == "calibration":
+            if p.calibration_seed_start is None:
+                raise ConfigError("calibration runs need protocol.calibration_seed_start (D-017)")
+            return int(p.calibration_seed_start)
+        return int(p.eval_seed_start)
+
+    def n_final_rollouts(self) -> int:
+        if self.plan.kind == "calibration":
+            return int(self.plan.grid.raw("n_final_rollouts"))
+        return int(self.plan.protocol.n_eval_rollouts)
+
     def _run(self, cmd: list[str], log: Path) -> float | None:
         log.parent.mkdir(parents=True, exist_ok=True)
         with open(log, "w") as f:
@@ -159,7 +174,6 @@ class LocalBackend:
         )
 
         t0 = time.time()
-        p = self.plan.protocol
         run_dir = scratch_dir("runs", rid)
         episodes = self.select(spec)
         sub_root = materialize_subset(self.repo_id, self.root, episodes, run_dir / "subset")
@@ -175,8 +189,9 @@ class LocalBackend:
                                     sample_weighting_progress=self.progress_parquet(spec))
         peak_train = self._run(train_cmd, run_dir / "train.log")
         ckpt = final_checkpoint(run_dir / "train", self.steps)
-        n = p.n_eval_rollouts
-        eval_cmd = build_eval_cmd(ckpt, n, p.eval_seed_start, int(self.plan.task.raw("eval_batch_size")),
+        n = self.n_final_rollouts()
+        seed0 = self.eval_seed_start()
+        eval_cmd = build_eval_cmd(ckpt, n, seed0, int(self.plan.task.raw("eval_batch_size")),
                                   env_type=self.plan.task.env_type, env_task=self.plan.task.env_task,
                                   output_dir=run_dir / "eval", device=self.device)
         peak_eval = self._run(eval_cmd, run_dir / "eval.log")
@@ -188,7 +203,7 @@ class LocalBackend:
                 ck = checkpoint_dir(run_dir / "train", step, self.steps)
                 out = run_dir / f"eval_step{step}"
                 bs = min(n_mid, int(self.plan.task.raw("eval_batch_size")))
-                cmd = build_eval_cmd(ck, n_mid, p.eval_seed_start, bs,
+                cmd = build_eval_cmd(ck, n_mid, seed0, bs,
                                      env_type=self.plan.task.env_type, env_task=self.plan.task.env_task,
                                      output_dir=out, device=self.device)
                 self._run(cmd, out.with_suffix(".log"))
@@ -206,7 +221,8 @@ class LocalBackend:
             lerobot_version=results.lerobot_version(),
             command_lines=[self.command_line, train_cmd, eval_cmd],
             seeds={"train_seed": spec.train_seed, "subset_seed": self.plan.subset_seed(spec),
-                   "eval_seed_start": p.eval_seed_start, "n_eval_rollouts": n},
+                   "eval_seed_start": seed0, "n_eval_rollouts": n,
+                   "seed_block": "calibration" if self.plan.kind == "calibration" else "eval"},
             per_episode_success=pes,
             n_episodes=n,
             success_rate=k / n,
