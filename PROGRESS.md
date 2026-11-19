@@ -45,6 +45,7 @@ Start 2026-11-19T16:32Z (`caffeinate -dims -t 43200`). Env: rcb (py3.12, lerobot
 | 2026-11-19T18:48Z | 8 references | docs/references.bib (14 verified entries) + README credits; CuraEval verified (arXiv 2610.38221, CoRL 2026 workshop); DataMIL code verified; QoQ code TODO unverified | n/a (docs) | done |
 | 2026-11-19T18:50Z | 9 submission path | .github/ISSUE_TEMPLATE/cleaner_submission.yml (issue form), .github/workflows/submit.yml (PR paths submissions/** examples/**; read-only; runs scripts/ci_submit.py -> job summary), scripts/ci_submit.py, submissions/README.md, docs/submit.md sections 5-6 (flow; D-026 replaces the stale D-016 text) | tests/test_ci_submit.py 4 passed (incl. slow end-to-end: venv + pip -e template + submit -> PASS table) | done; workflow logic tested locally against examples/cleaner_template (not run on GitHub) |
 | 2026-11-19T18:52Z | 10 packaging + Space | PyPI robocurate-bench and robocurate both 404 (free); build + twine check PASSED (0.0.1; wheel = robocurate only; MANIFEST.in prunes sdist to src); space/ static Space (keys per hub-docs@37ae8ca8); report --site Space-aware, refuses FAKE | tests/test_space.py 3 passed; ruff clean | done; nothing uploaded or deployed |
+| 2026-11-19T19:24Z | 11 final verification | all suites + fake e2e both launch grids (weighting track, reproduce one cell per task) + Task A v1 CPU-part build (after the Hub came back) | CI 260 passed + 1 skipped + 1 xfailed; slow 18 passed + 1 xfailed; integration 4 passed; gpu 2 skipped; ruff clean | fully green; B-007 resolved |
 <!-- ng-log -->
 
 ## Previous status (B-003/M0-launch task, STOPPED at Step 1, B-004; superseded by D-026)
@@ -377,6 +378,140 @@ d = 4000, lambda = 0, m = 100).
 - *Next step if wanted.* (b): a toy diffusion policy (DDPM loss, the reference "square" output, Q = 1) on the
   toybed, then require the sanity pass there.
 
+## Final verification (overnight 2, item 11) — all suites green
+
+Mac, CPU, `CUDA_VISIBLE_DEVICES=""`, HEAD `fdafefc` + PROGRESS edits.
+
+| suite | command | result |
+|---|---|---|
+| CI default | `pytest -q -m "not gpu and not slow and not integration"` | **260 passed, 1 skipped, 1 xfailed** (skip: PushT env test, gym-pusht not in the lock, passes in the scratch venv; xfail: CUPID on the MLP toybed, strict) |
+| slow | `pytest -q -m slow` | **18 passed, 1 xfailed** (CUPID diffusion, strict) in 23 min |
+| integration | `pytest -q -m integration` | **4 passed** (run at 19:18Z, after B-007 cleared) |
+| gpu | `pytest -q -m gpu` | **2 skipped** (no CUDA), none failed |
+| ruff | `ruff check .` | clean |
+
+Fake end-to-end on the launch grids (FAKE numbers):
+- Task A (`task_a_v1`): prepare (every entrant + RA-BC with 8 D-028 permutations) -> run (84) -> report.
+- Task B (`pusht_diffusion_v0`): prepare -> run (57) -> report.
+- reproduce on one cell per task, plus the weighting cell.
+
+```text
+===== Task a: configs/grids/task_a_v1.yaml
+rabc v1 [weighting] budget 1.0: progress + 8 D-028 placebo progress parquets; computed in 0.02s, GPU-h 0.000, rollouts 0, key cc2aad47c17a
+length_heuristic v1 [selection] budget 0.5: 25 episodes; computed in 0.00s, GPU-h 0.000, rollouts 0, key f4b64547c6c6
+lerobot_doctor v1 [selection] budget 0.5: 25 episodes; computed in 0.07s, GPU-h 0.000, rollouts 0, key d5084e2c5328
+kinema v1 [selection] budget 0.5: 25 episodes; computed in 0.18s, GPU-h 0.000, rollouts 0, key 17258141dc50
+roboaudit v1 [selection] budget 0.5: 25 episodes; computed in 0.45s, GPU-h 0.000, rollouts 0, key 873a63d3d6ec
+rda v1 [selection] budget 0.5: 25 episodes; computed in 0.32s, GPU-h 0.000, rollouts 0, key e36f4117aed7
+robometer_filter v1 [selection] budget 0.5: 25 episodes; computed in 0.00s, GPU-h 0.000, rollouts 0, key 8f3db9f4b352
+rcb_score v1 [selection] budget 0.5: 25 episodes; computed in 0.00s, GPU-h 0.000, rollouts 0, key 07ef0d428b25
+demo_score v1 [selection] budget 0.5: 25 episodes; computed in 4.08s, GPU-h 0.000, rollouts 100, key 296c6beef144
+deminf v1 [selection] budget 0.5: 25 episodes; computed in 334.00s, GPU-h 0.000, rollouts 0, key 8940c30f3672
+selections -> $SCRATCHPAD/e2e_final/sel_a
+84 runs -> $SCRATCHPAD/e2e_final/res_a
+done=84 skipped_existing=0 skipped_locked=0 reclaimed_stale_locks=0
+site: $SCRATCHPAD/e2e_final/site_a/index.html
+*** FAKE RESULTS (synthetic backend) ***
+task aloha_transfer_cube budget 0.5 (selection):
+  full                         runs=3   mean=0.522  cell 5c055b8f910e
+  random                       runs=24  mean=0.485  cell e5267b2f86c9
+  oracle                       runs=3   mean=0.790  cell b8be368d553c
+  cleaner:deminf               runs=3   mean=0.562  cell 0a7812ffd66a
+  cleaner:demo_score           runs=3   mean=0.485  cell 976eef21b3a3
+  cleaner:kinema               runs=3   mean=0.517  cell 593952775593
+  cleaner:length_heuristic     runs=3   mean=0.532  cell 186cc0bd36cb
+  cleaner:lerobot_doctor       runs=3   mean=0.475  cell 7f015a52f6a6
+  cleaner:rcb_score            runs=3   mean=0.505  cell 6903bda1a3e0
+  cleaner:rda                  runs=3   mean=0.493  cell 83227380db90
+  cleaner:roboaudit            runs=3   mean=0.520  cell 17b6ce60352f
+  cleaner:robometer_filter     runs=3   mean=0.493  cell f4c401dca28a
+  cleaner:length_heuristic vs placebo [D-026]: diff=+0.047 SE=0.030 df=7 p_holm=1 not significant   (Welch secondary p_holm=0.679)
+  cleaner:robometer_filter vs placebo [D-026]: diff=+0.009 SE=0.030 df=7 p_holm=1 not significant   (Welch secondary p_holm=1)
+  cleaner:rda vs placebo [D-026]: diff=+0.009 SE=0.030 df=7 p_holm=1 not significant   (Welch secondary p_holm=1)
+  cleaner:roboaudit vs placebo [D-026]: diff=+0.035 SE=0.030 df=7 p_holm=1 not significant   (Welch secondary p_holm=1)
+  cleaner:kinema vs placebo [D-026]: diff=+0.032 SE=0.030 df=7 p_holm=1 not significant   (Welch secondary p_holm=1)
+  cleaner:deminf vs placebo [D-026]: diff=+0.077 SE=0.030 df=7 p_holm=0.341 not significant   (Welch secondary p_holm=1)
+  cleaner:lerobot_doctor vs placebo [D-026]: diff=-0.010 SE=0.030 df=7 p_holm=1 not significant   (Welch secondary p_holm=1)
+  cleaner:demo_score vs placebo [D-026]: diff=+0.000 SE=0.030 df=7 p_holm=1 not significant   (Welch secondary p_holm=1)
+  cleaner:rcb_score vs placebo [D-026]: diff=+0.020 SE=0.030 df=7 p_holm=1 not significant   (Welch secondary p_holm=1)
+  [ref] oracle vs placebo: diff=+0.305 p=1.96e-05 SIGNIFICANT
+  [ref] full vs placebo: diff=+0.037 p=0.355 not significant
+  s_sub=0.000 (truncated) s_seed=0.061 K=8 n_p=3 n_c=3  MDE (80% power): 0.151
+task aloha_transfer_cube full data (weighting):
+  full                         runs=3   mean=0.522  cell 5c055b8f910e
+  weighting:rabc               runs=3   mean=0.465  cell a03b0f077b04
+  weight_placebo:rabc          runs=24  mean=0.511  cell 167857559e44
+  weighting:rabc vs placebo [D-026]: diff=-0.046 SE=0.045 df=7 p_holm=0.338 not significant   (Welch secondary p_holm=0.716)
+  [ref] full vs placebo: diff=+0.010 p=0.861 not significant
+  s_sub=0.000 (truncated) s_seed=0.094 K=8 n_p=3 n_c=3  MDE (80% power): 0.147
+wrote $SCRATCHPAD/e2e_final/res_a/report.md, $SCRATCHPAD/e2e_final/res_a/leaderboard.json
+===== Task b: configs/grids/pusht_diffusion_v0.yaml
+length_heuristic v1 [selection] budget 0.5: 25 episodes; computed in 0.00s, GPU-h 0.000, rollouts 0, key 07a71b41887d
+lerobot_doctor v1 [selection] budget 0.5: 25 episodes; computed in 0.07s, GPU-h 0.000, rollouts 0, key 6aac56c65d43
+kinema v1 [selection] budget 0.5: 25 episodes; computed in 0.18s, GPU-h 0.000, rollouts 0, key 877df2644cc9
+roboaudit v1 [selection] budget 0.5: 25 episodes; computed in 0.53s, GPU-h 0.000, rollouts 0, key 549d54416c90
+rda v1 [selection] budget 0.5: 25 episodes; computed in 0.26s, GPU-h 0.000, rollouts 0, key 5b188f298999
+robometer_filter v1 [selection] budget 0.5: 25 episodes; computed in 0.00s, GPU-h 0.000, rollouts 0, key 5b2706109dfd
+rcb_score v1 [selection] budget 0.5: 25 episodes; computed in 0.01s, GPU-h 0.000, rollouts 0, key 06c8c0c6015a
+demo_score v1 [selection] budget 0.5: 25 episodes; computed in 4.01s, GPU-h 0.000, rollouts 100, key 7b7c36ca7f66
+deminf v1 [selection] budget 0.5: 25 episodes; computed in 283.33s, GPU-h 0.000, rollouts 0, key ed6a35bfc969
+selections -> $SCRATCHPAD/e2e_final/sel_b
+57 runs -> $SCRATCHPAD/e2e_final/res_b
+done=57 skipped_existing=0 skipped_locked=0 reclaimed_stale_locks=0
+site: $SCRATCHPAD/e2e_final/site_b/index.html
+*** FAKE RESULTS (synthetic backend) ***
+task pusht_diffusion budget 0.5 (selection):
+  full                         runs=3   mean=0.555  cell c870d3f09d6b
+  random                       runs=24  mean=0.515  cell a435f8131f00
+  oracle                       runs=3   mean=0.800  cell df0fb959c41b
+  cleaner:deminf               runs=3   mean=0.470  cell 50bb4a05fd9c
+  cleaner:demo_score           runs=3   mean=0.477  cell 209ab554b614
+  cleaner:kinema               runs=3   mean=0.462  cell 71e34dadda29
+  cleaner:length_heuristic     runs=3   mean=0.500  cell fc964e0d8e86
+  cleaner:lerobot_doctor       runs=3   mean=0.477  cell dfff6c3fa799
+  cleaner:rcb_score            runs=3   mean=0.553  cell 9dd3daef149b
+  cleaner:rda                  runs=3   mean=0.467  cell f6fc2c7180b6
+  cleaner:roboaudit            runs=3   mean=0.518  cell 4d49063723fc
+  cleaner:robometer_filter     runs=3   mean=0.500  cell 1ba47d9b1ded
+  cleaner:roboaudit vs placebo [D-026]: diff=+0.003 SE=0.044 df=7 p_holm=1 not significant   (Welch secondary p_holm=1)
+  cleaner:kinema vs placebo [D-026]: diff=-0.054 SE=0.044 df=7 p_holm=1 not significant   (Welch secondary p_holm=0.0765)
+  cleaner:deminf vs placebo [D-026]: diff=-0.045 SE=0.044 df=7 p_holm=1 not significant   (Welch secondary p_holm=1)
+  cleaner:rda vs placebo [D-026]: diff=-0.049 SE=0.044 df=7 p_holm=1 not significant   (Welch secondary p_holm=1)
+  cleaner:rcb_score vs placebo [D-026]: diff=+0.038 SE=0.044 df=7 p_holm=1 not significant   (Welch secondary p_holm=1)
+  cleaner:lerobot_doctor vs placebo [D-026]: diff=-0.039 SE=0.044 df=7 p_holm=1 not significant   (Welch secondary p_holm=0.873)
+  cleaner:length_heuristic vs placebo [D-026]: diff=-0.015 SE=0.044 df=7 p_holm=1 not significant   (Welch secondary p_holm=1)
+  cleaner:demo_score vs placebo [D-026]: diff=-0.039 SE=0.044 df=7 p_holm=1 not significant   (Welch secondary p_holm=1)
+  cleaner:robometer_filter vs placebo [D-026]: diff=-0.015 SE=0.044 df=7 p_holm=1 not significant   (Welch secondary p_holm=1)
+  [ref] oracle vs placebo: diff=+0.285 p=0.000332 SIGNIFICANT
+  [ref] full vs placebo: diff=+0.040 p=0.391 not significant
+  s_sub=0.005 s_seed=0.071 K=8 n_p=3 n_c=3  MDE (80% power): 0.219
+wrote $SCRATCHPAD/e2e_final/res_b/report.md, $SCRATCHPAD/e2e_final/res_b/leaderboard.json
+```
+
+```text
+== reproduce, Task A (length_heuristic cell, then the RA-BC weighting cell)
+config configs/grids/task_a_v1.yaml: sha256 25c845c26226 ok
+config $SCRATCHPAD/e2e_final/fake_a.yaml: sha256 05f77128b8cb ok
+selection cache keys: f4b64547c6c6
+commands:
+  git checkout 20ebbd65d14ad6ac02d4d0c950cc5448ee577a6b   # NOTE: original tree was dirty
+  robocurate prepare configs/grids/task_a_v1.yaml --backend fake --selections-dir <SELECTIONS>
+  robocurate run configs/grids/task_a_v1.yaml --backend fake --fake-params $SCRATCHPAD/e2e_final/fake_a.yaml --results-dir $SCRATCHPAD/e2e_final/res_a --selections-dir $SCRATCHPAD/e2e_final/sel_a
+re-executed: MATCH 3/3
+
+config configs/grids/task_a_v1.yaml: sha256 25c845c26226 ok
+config $SCRATCHPAD/e2e_final/fake_a.yaml: sha256 05f77128b8cb ok
+selection cache keys: cc2aad47c17a
+commands:
+  git checkout 20ebbd65d14ad6ac02d4d0c950cc5448ee577a6b   # NOTE: original tree was dirty
+  robocurate prepare configs/grids/task_a_v1.yaml --backend fake --selections-dir <SELECTIONS>
+  robocurate run configs/grids/task_a_v1.yaml --backend fake --fake-params $SCRATCHPAD/e2e_final/fake_a.yaml --results-dir $SCRATCHPAD/e2e_final/res_a --selections-dir $SCRATCHPAD/e2e_final/sel_a
+re-executed: MATCH 3/3
+== reproduce, Task B (deminf cell)
+cell 50bb4a05fd9c: task pusht_diffusion budget 0.5 condition {'kind': 'cleaner', 'name': 'deminf', 'version': '1'} (3 runs, kind fake)
+re-executed: MATCH 3/3
+```
+
 ## Packaging and Space prep (overnight 2, item 10) — nothing published, nothing deployed
 
 - **PyPI names** (JSON API, 2026-11-19): `https://pypi.org/pypi/robocurate-bench/json` -> 404 and
@@ -649,6 +784,13 @@ Task B grid (slow, 4 min: 57 runs). Result: 6 passed + 1 skipped (rcb); env test
   needs strong noise. Failed grasp: right gripper (dim 13) forced to 1.0 (open, its max) from frame 135 (where the
   scripted right gripper starts closing in all 50 episodes; it crosses 0.5 at frame 152) to the end.
 
+- **CPU part built as a LeRobot dataset** after B-007 cleared (19:20Z):
+  - `build_mixture(configs/mixtures/task_a_v1.yaml)` -> `$ROBOCURATE_SCRATCH/datasets/robocurate/task_a_v1_cpu`:
+    90 episodes, 38,085 frames, 140 MB, 301 s on CPU, video re-encoded.
+  - It loads with `LeRobotDataset` (observation.images.top, observation.state).
+  - The labels sidecar sits beside the root, not inside it: 45 paused (26 scripted, 19 human), 45 clean.
+  - `robocurate validate-defects` on the built dataset gives exactly the parquet-level numbers below: interior
+    pause rate 0.50, interior pause p50 0.94 s, jitter 0, 0 exact / 2 near duplicates, HF share p50 8.9e-4.
 - **validate-defects on the CPU-buildable part** (`scripts/diagnostics/task_a_v1_validate.py`; offline HF cache,
   actions/state/timestamps only). The video build of the 90 episodes is blocked tonight: huggingface.co presents a
   self-signed certificate chain from this network (TLS not bypassed), and the scripted source is cached as parquet
@@ -710,6 +852,21 @@ Timebox 4 h; used ~1 h. CPU only. Nothing about the entrant was tuned; the toybe
 - Scripts: scratchpad `diff_premise.py`, `diff_cupid.py`, `diff_diag.py` (not committed; numbers above).
 
 ## Blocked
+
+- **B-007 (2026-11-19T18:35Z; RESOLVED 19:18Z, the Hub is reachable again; integration 4 passed, environment) — huggingface.co unreachable from this Mac: TLS "self-signed
+  certificate in certificate chain".**
+  - *Symptom.* curl, httpx, huggingface_hub and WebFetch all fail for huggingface.co and cdn-lfs.huggingface.co
+    (HTTP 000). PyPI, GitHub and arXiv work. Hub downloads worked earlier tonight (16:58Z, pusht, 7.7 MB).
+  - *Effects.* The 2 Hub-dependent integration tests (`test_integration_data.py::test_mixture_reloads_with_lerobot`,
+    `::test_subset_stats_come_from_subset_only`) error, and `test_task_b.py::test_pusht_metadata_loads_on_cpu`
+    fails. All three passed before the network changed (start-of-night default run, 227 passed). The Task A v1
+    CPU-part video build cannot run; it was validated on parquet instead. HF docs were read from GitHub
+    (hub-docs) instead.
+  - *Not done.* TLS verification was not bypassed. `HF_HUB_OFFLINE=1` does not help (LeRobot's metadata loader
+    still needs the snapshot download).
+  - *Consequence.* Item 11 is not fully green, so main was **not** fast-forwarded (item 12 rule).
+  - *Resolves when:* the Hub is reachable again. Then run `pytest -q -m integration` and, if green, the
+    fast-forward.
 
 - **B-006 (2026-11-19T15:10Z; CLOSED by D-027: /share/datasets/robocurate) — no scratch path on hokkaido; Step 2 outcome (c), Step 3 skipped.**
   - *Evidence (read-only).* `ssh hokkaido 'ls -ld /disk /disk/u; ls /disk; ...'`: "ls: cannot access '/disk': No such
