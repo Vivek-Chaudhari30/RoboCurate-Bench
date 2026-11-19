@@ -21,6 +21,8 @@ import yaml
 
 SEED_FLOOR = 6  # D-015 (Welch + Holm needs >= 6 runs per condition to hold the null FWER)
 
+CALIBRATION_SEED_SPAN = 100_000  # calibration_seed_start .. +SPAN is reserved for calibration evals (D-017)
+
 Mode = Literal["result", "calibration", "fake", "plan"]
 MODES: tuple[str, ...] = ("result", "calibration", "fake", "plan")
 
@@ -182,6 +184,7 @@ class ProtocolConfig(_Guarded):
     curation_seed_range: list[int]
     alpha: float
     test: str
+    calibration_seed_start: int | None = None  # D-017; calibration evals only, never eval seeds
     n_random_subsets_min: int = 3
 
     def __post_init__(self) -> None:
@@ -214,13 +217,23 @@ class ProtocolConfig(_Guarded):
             n = -(-n // batch_size) * batch_size
         return (self.eval_seed_start, self.eval_seed_start + n)
 
+    def calibration_seed_range(self) -> tuple[int, int] | None:
+        """Half-open env-seed block reserved for calibration evals (D-017)."""
+        if self.calibration_seed_start is None:
+            return None
+        return (self.calibration_seed_start, self.calibration_seed_start + CALIBRATION_SEED_SPAN)
+
     def check_seed_disjointness(self, batch_size: int | None = None) -> None:
-        e0, e1 = self.eval_seed_range(batch_size)
-        c0, c1 = self.curation_seed_range
-        if not (e1 <= c0 or c1 + 1 <= e0):
-            raise ConfigError(
-                f"eval seeds [{e0},{e1}) overlap curation_seed_range {self.curation_seed_range}"
-            )
+        ranges = {"eval": self.eval_seed_range(batch_size),
+                  "curation": (self.curation_seed_range[0], self.curation_seed_range[1] + 1)}
+        cal = self.calibration_seed_range()
+        if cal is not None:
+            ranges["calibration"] = cal
+        items = list(ranges.items())
+        for i, (na, (a0, a1)) in enumerate(items):
+            for nb, (b0, b1) in items[i + 1:]:
+                if not (a1 <= b0 or b1 <= a0):
+                    raise ConfigError(f"{na} seeds [{a0},{a1}) overlap {nb} seeds [{b0},{b1})")
 
 
 def load_protocol(path: str | Path, mode: Mode = "plan") -> ProtocolConfig:

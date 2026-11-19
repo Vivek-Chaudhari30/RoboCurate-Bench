@@ -116,6 +116,8 @@ def test_protocol_tbd_result_mode_raises(tmp_path):
         (("n_train_seeds: TBD\ntrain_seeds: TBD", "n_train_seeds: 3\ntrain_seeds: [1, 2, 3]"), "floor is 6"),
         (("curation_seed_range: [500000, 599999]", "curation_seed_range: [100100, 200000]"), "overlap"),
         (("test: welch_holm", "test: binomial"), "D-002"),
+        (("alpha: 0.05", "alpha: 0.05\ncalibration_seed_start: 100050"), "calibration seeds"),
+        (("alpha: 0.05", "alpha: 0.05\ncalibration_seed_start: 450000"), "calibration seeds"),
     ],
 )
 def test_protocol_rejects_rule_violations(tmp_path, patch, msg):
@@ -238,3 +240,15 @@ def test_git_info_and_versions():
     assert len(g.hash) in (40, len("NO_COMMIT"))
     assert results.lerobot_version() == "0.6.1"
     json.dumps(results.hostname())
+
+
+def test_repo_protocol_calibration_seeds_disjoint():
+    """D-017: the repo protocol reserves a calibration seed block disjoint from eval and curation seeds."""
+    from robocurate.paths import repo_root
+
+    p = C.load_protocol(repo_root() / "configs/protocol.yaml")
+    c0, c1 = p.calibration_seed_range()
+    assert c0 == 300000
+    e0, e1 = p.eval_seed_range(50)
+    assert c1 <= e0 or e1 <= c0
+    assert c1 <= p.curation_seed_range[0] or p.curation_seed_range[1] < c0

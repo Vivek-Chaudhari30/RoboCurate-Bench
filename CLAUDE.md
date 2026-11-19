@@ -15,6 +15,7 @@ RoboCurate-Bench tests whether robot-data "cleaners" (episode filters) improve i
 7. Cleaners never receive ground-truth labels (*.labels.json), eval code, eval seeds, or eval results.
 8. Every results JSON records: git hash (clean tree), config path + sha256, lerobot version, exact command lines, all seeds, wall-clock, peak GPU memory, hostname.
 9. Never tune anything after seeing entrant results. Negative results are reported exactly like positive ones.
+10. Calibration evals use calibration_seed_start from protocol.yaml, never eval seeds.
 
 ## Frozen paths
 - src/robocurate/eval/, configs/protocol.yaml and configs/frozen/ are FROZEN once src/robocurate/eval/FROZEN exists.
