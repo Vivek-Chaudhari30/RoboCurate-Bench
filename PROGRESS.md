@@ -259,6 +259,27 @@ re-executed: MATCH 3/3
 Oracle (reference, D-026 test): +0.197, p = 0.0068, significant. length_heuristic: −0.003, p_holm 0.957, not
 significant. rabc vs its 8 permutations: +0.017, p_holm 0.664. Full vs placebo: not significant. Reproduce MATCH 3/3.
 
+## Checker installs (Step 5 of the D-026 task)
+
+Installed 2026-11-19 into the Mac rcb env with exact pins (`pip install` of the four pins below; before/after
+`pip freeze` diff: + kinema, lerobot-doctor, roboaudit, robot-data-audit, rich 15.0.0, markdown-it-py 4.3.0,
+mdurl 0.1.2; nothing upgraded or removed). requirements.lock regenerated (= `pip freeze --exclude-editable`, +7
+lines). No sudo, system packages, Docker or GPU; each download < 1 MB. Sources checked against the PyPI JSON API
+(project URLs) and installed-distribution metadata (license). Conformance = `robocurate submit <name>` (fake curation
+context now writes the label-free view as a LeRobot dataset for cleaners that declare `requires_dataset_root`, via
+the new labels-free `data/lerobot_write.py`). Sanity = real tool on the toybed LeRobot dataset (50 demos: 30 clean,
+6 pause, 6 jitter, 8 wrong-direction), fraction kept at a 50% budget; criterion: some planted defect type kept less
+than clean (tests `test_checker_toybed_sanity`, `test_checker_conformance_with_installed_tool`). Not tuned.
+
+| checker | source | version | license | installed | conformance | sanity: kept clean / pause / jitter / wrong |
+|---|---|---|---|---|---|---|
+| lerobot-doctor | PyPI `lerobot-doctor` | 0.2.0 | Apache-2.0 | yes | PASS | 0.50 / 0.00 / 0.83 / 0.62 (pass) |
+| kinema | PyPI `kinema` (links github.com/vedevpatel/kinema) | 0.1.0 (0.1.1 exists; adapter built for 0.1.0) | Apache-2.0 | yes | PASS | 0.63 / 0.00 / 0.00 / 0.75 (pass) |
+| roboaudit | PyPI `roboaudit` | 0.3.1 | MIT | yes | PASS | 0.67 / 0.00 / 0.83 / 0.00 (pass; flags all 50 as at least "review") |
+| RDA | github.com/liesliy/rda (the PyPI project `robot-data-audit` 0.12.5 links it) | commit 47c69459 (= 0.12.5) | MIT | yes | PASS | 0.63 / 0.00 / 1.00 / 0.00 (pass; ranks by score, no episode flagged) |
+| trajlens | PyPI `trajlens` | 0.4.0 | Apache-2.0 | no | — | — (pyarrow<25 conflicts with the lock's 26.0.1; PyPI links a placeholder repo `yourusername/trajlens`) |
+| retake | github.com/TheNandinee/retake (PyPI `retake` is an unrelated vector-DB package) | — | Apache-2.0 (overnight read) | no | — | — (upgrades core packages; calls external LLM APIs) |
+
 ## CUPID sanity investigation (Step 6 of the D-026 task) — outcome (c): unresolved, entrant disabled
 
 Timebox 3 h; used ~1.2 h (CPU only). No hyperparameter of the entrant was changed. Diagnostics:

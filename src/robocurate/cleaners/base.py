@@ -42,6 +42,7 @@ class Cleaner(ABC):
     source: str = ""  # citation, paper section or repo@commit
     # "active", or "disabled — <reason>": disabled entrants are refused in grids and excluded from the leaderboard
     status: str = "active"
+    requires_dataset_root: bool = False  # reads the LeRobot dataset directory (checker adapters), D-022
     context: Any = None  # curation.context.CurationContext, set by the prepare stage
 
     @abstractmethod
@@ -50,7 +51,8 @@ class Cleaner(ABC):
 
     def resources(self) -> dict[str, Any]:
         return {"track": self.track, "requires_rollouts": self.requires_rollouts,
-                "requires_reference_policy": self.requires_reference_policy, "requires_gpu": self.requires_gpu}
+                "requires_reference_policy": self.requires_reference_policy, "requires_gpu": self.requires_gpu,
+                "requires_dataset_root": self.requires_dataset_root}
 
     def metadata(self) -> dict[str, Any]:
         return {"name": self.name, "version": self.version, "implementation": self.implementation,

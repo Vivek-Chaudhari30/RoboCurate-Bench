@@ -288,3 +288,45 @@ def test_cupid_influence_matches_leave_one_out_refit():
     loo = np.array([T(fit(np.delete(np.arange(N), z))) - T(W) for z in range(N)])
     assert np.corrcoef(loo, -score)[0, 1] > 0.99
     assert np.mean(np.sign(loo) == np.sign(-score)) > 0.95
+
+
+# ------------------------------------------------------------------ checkers, installed ([checkers] extra)
+CHECKER_MODULES = {"lerobot_doctor": "lerobot_doctor", "kinema": "kinema", "roboaudit": "roboaudit", "rda": "rda"}
+
+
+@pytest.fixture(scope="module")
+def toy_dataset_root(tmp_path_factory):
+    from robocurate.data.lerobot_write import write_view_dataset
+
+    view, labels = make_dataset()
+    return view, labels, write_view_dataset(view, tmp_path_factory.mktemp("toyds") / "toybed")
+
+
+@pytest.mark.parametrize("name", list(CHECKER_MODULES))
+def test_checker_toybed_sanity(name, toy_dataset_root):
+    """Runs the real tool on the toybed LeRobot dataset (no labels sidecar). Sanity: some planted defect type is
+    kept less often than clean demos (pauses, the defect every checker targets). Reported, not tuned."""
+    pytest.importorskip(CHECKER_MODULES[name])
+    view, labels, root = toy_dataset_root
+    cl = registry.get(name)
+    cl.context = CurationContext(dataset_root=root)
+    ids = set(cl.select(view, len(labels) // 2, np.random.default_rng(0)))
+    frac = {k: np.mean([i in ids for i in labels if labels[i] == k]) for k in KINDS}
+    assert frac["pause"] < frac["clean"], frac
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize("name", list(CHECKER_MODULES))
+def test_checker_conformance_with_installed_tool(name):
+    pytest.importorskip(CHECKER_MODULES[name])
+    rep = conformance.check(name)
+    assert rep.passed, rep.lines()
+
+
+def test_fake_context_dataset_root_has_no_labels(tmp_path):
+    """Checkers read a dataset directory: the fake one written for conformance carries no labels sidecar."""
+    from robocurate.curation.prepare import fake_dataset_root
+
+    root = fake_dataset_root(synthetic_view(6), tmp_path)
+    assert (root / "meta" / "info.json").exists()
+    assert not list(root.rglob("*labels*"))

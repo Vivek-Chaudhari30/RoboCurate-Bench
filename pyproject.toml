@@ -20,10 +20,11 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest==9.2.0", "ruff==0.17.5"]
-# Wrapped open-source checkers (m1-core item 5a). Pinned exactly; NOT part of requirements.lock (the core env).
-# trajlens 0.4.0 is excluded (requires pyarrow<25, lock pins 26.0.1); retake is excluded (upgrades numpy/pandas/
-# huggingface_hub/pillow, calls external LLM APIs). Dry-run installs on 2026-11-19 added only rich,
-# markdown-it-py and mdurl to the core env (no version changes).
+# Wrapped open-source checkers. Pinned exactly; installed into the rcb env on 2026-11-19 and included in
+# requirements.lock (the install added only rich, markdown-it-py and mdurl; no version changes).
+# Excluded: trajlens 0.4.0 (requires pyarrow<25, lock pins 26.0.1; its PyPI project links a placeholder repo
+# github.com/yourusername/trajlens, so the official source cannot be confirmed); retake (the PyPI name is an
+# unrelated package; the GitHub tool upgrades numpy/pandas/huggingface_hub/pillow and calls external LLM APIs).
 checkers = [
     "lerobot-doctor==0.2.0",
     "kinema==0.1.0",

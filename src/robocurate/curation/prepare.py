@@ -122,10 +122,22 @@ def fake_reference_policy(view: DatasetView, cache_dir: Path) -> ReferencePolicy
     return ReferencePolicy(path, loader=MLPPolicy.load)
 
 
+def fake_dataset_root(view: DatasetView, cache_dir: Path) -> Path:
+    """The label-free view written once as a LeRobot dataset (checker adapters read a dataset directory)."""
+    from robocurate.data.lerobot_write import write_view_dataset
+
+    root = Path(cache_dir) / "_fake_dataset" / view.fingerprint()[:16]
+    if not (root / "meta" / "info.json").exists():
+        write_view_dataset(view, root)
+    return root
+
+
 def fake_context_factory(protocol: Any, view: DatasetView, cache_dir: Path) -> Callable[[Cleaner], CurationContext]:
     def make(cleaner: Cleaner) -> CurationContext:
         e0 = next(iter(view))
         ctx = CurationContext(backend="fake", progress_model=CachedProgress(MockProgressModel(), cache_dir))
+        if getattr(cleaner, "requires_dataset_root", False):
+            ctx.dataset_root = fake_dataset_root(view, cache_dir)
         if cleaner.requires_rollouts:
             ctx.rollouts = RolloutService.from_protocol(
                 protocol, FakeRolloutBackend(e0.state.shape[1], e0.actions.shape[1]), cap=cleaner.requires_rollouts)

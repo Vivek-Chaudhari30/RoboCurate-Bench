@@ -45,6 +45,7 @@ def combine(rank_class: int, tool_score: float = 0.0) -> float:
 
 class CheckerCleaner(ScoreCleaner):
     implementation = "wrapped"
+    requires_dataset_root = True
     tool: str = ""
 
     def select(self, view: DatasetView, budget: int, rng: np.random.Generator) -> list[int]:
