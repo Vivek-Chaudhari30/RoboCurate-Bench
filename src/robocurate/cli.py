@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import sys
 from pathlib import Path
@@ -174,6 +175,37 @@ def cmd_submit(args) -> int:
     return 0
 
 
+def cmd_validate_defects(args) -> int:
+    """Defect statistics from actions/state/timestamps only (no video). Args: local dirs or repo_id[@revision]."""
+    from robocurate.data.validate import analyze, fetch_non_video, load_parquet_dataset
+    from robocurate.paths import require_storage_env
+
+    require_storage_env()
+    out = {}
+    for src in args.datasets:
+        p = Path(src)
+        if p.is_dir():
+            root, rev = p, None
+        else:
+            repo, _, rev = src.partition("@")
+            if not rev:
+                raise ConfigError(f"{src}: pin a revision (repo_id@sha)")
+            root = fetch_non_video(repo, rev)
+        info, eps = load_parquet_dataset(root)
+        a = analyze(info, eps)
+        a["source"], a["revision"] = src, rev
+        out[src] = a
+        print(f"{src}: {a['n_episodes']} eps @ {a['fps']:g} fps | pause rate {a['pause']['episode_rate']:.2f} "
+              f"(interior {a['pause']['interior_episode_rate']:.2f}) | "
+              f"jitter>0.10 {a['jitter']['episodes_above_0.10']:.2f} | exact dups "
+              f"{a['duplicates']['exact_duplicate_episodes']}, near-dup pairs {a['duplicates']['near_duplicate_pairs']}"
+              f" | len p50 {a['length_seconds'].get('p50', 0):.1f}s | tasks {a['tasks']['distinct']}")
+    if args.out:
+        Path(args.out).write_text(json.dumps(out, indent=2, default=float) + "\n")
+        print(f"wrote {args.out}")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(prog="robocurate", description="RoboCurate-Bench")
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -205,6 +237,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--out", help="output dir (default: results_dir)")
     p.add_argument("--n-boot", type=int, default=10_000)
     p.set_defaults(fn=cmd_report)
+
+    p = sub.add_parser("validate-defects", help="defect stats from actions/state/timestamps (no video download)")
+    p.add_argument("datasets", nargs="+", help="local dataset dirs or repo_id@revision")
+    p.add_argument("--out", help="write the full statistics as JSON")
+    p.set_defaults(fn=cmd_validate_defects)
 
     p = sub.add_parser("submit", help="conformance-check a cleaner (path.py, module:Class, or registered name)")
     p.add_argument("cleaner")

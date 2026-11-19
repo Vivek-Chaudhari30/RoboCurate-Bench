@@ -58,3 +58,23 @@ def test_policy_source_end_to_end(tmp_path, scratch_env):
 def test_policy_source_rejects_unknown_perturbation():
     with pytest.raises(ConfigError):
         M.make_perturbations(({"type": "teleport"},))
+
+
+def test_validate_defects_on_toy_lerobot_dataset(tmp_path, scratch_env):
+    """validate.py reads a LeRobot v3 dataset from parquet only and finds a planted interior pause + duplicate."""
+    from robocurate.data.validate import analyze, load_parquet_dataset
+
+    eps = M.collect_policy_episodes(
+        [M.PolicySource("expert", "fake://expert", 1, 6),
+         M.PolicySource("hold", "fake://expert", 1, 2,  # zero action on both dims = held pose
+                        ({"type": "gripper_drop", "onset": 3, "duration": 15, "gripper_dims": [0, 1],
+                          "open_value": 0.0},))],
+        _load, PointReachEnv, PROTO, max_steps=60)
+    eps.append(eps[0])  # exact duplicate
+    root = M.write_policy_dataset(eps, "rcb/toy_val", tmp_path / "ds", fps=10, task="reach", shuffle_seed=1)
+    info, loaded = load_parquet_dataset(root)
+    a = analyze(info, loaded)
+    assert a["n_episodes"] == 9 and a["fps"] == 10
+    assert a["duplicates"]["exact_duplicate_episodes"] == 1
+    assert a["pause"]["n_interior_segments"] >= 2 and a["pause"]["interior_episode_rate"] >= 2 / 9
+    assert a["tasks"]["distinct"] == 1

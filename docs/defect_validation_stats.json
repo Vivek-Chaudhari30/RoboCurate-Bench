@@ -1,0 +1,322 @@
+{
+  "lerobot/svla_so101_pickplace@f641879e22172be7e8161d5e6c1503c2d2feb657": {
+    "n_episodes": 50,
+    "fps": 30.0,
+    "codebase_version": "v3.0",
+    "robot_type": "so100_follower",
+    "pause": {
+      "tau": 0.08619714157968056,
+      "min_segment_s": 0.5,
+      "episode_rate": 0.96,
+      "segment_seconds": {
+        "p5": 0.53,
+        "p25": 0.6166666666666667,
+        "p50": 0.7,
+        "p75": 0.9166666666666667,
+        "p95": 1.5399999999999998
+      },
+      "n_segments": 79,
+      "interior_episode_rate": 0.06,
+      "interior_segment_seconds": {
+        "p5": 0.5716666666666667,
+        "p25": 0.5916666666666667,
+        "p50": 0.6166666666666667,
+        "p75": 1.025,
+        "p95": 1.9649999999999996
+      },
+      "n_interior_segments": 4,
+      "pause_frame_fraction": {
+        "p5": 0.15605684428963168,
+        "p25": 0.1937198682331651,
+        "p50": 0.21880100097921878,
+        "p75": 0.25536673747344746,
+        "p95": 0.3490839494202722
+      }
+    },
+    "jitter": {
+      "hf_power_share": {
+        "p5": 1.31057779346016e-05,
+        "p25": 2.0287828070323774e-05,
+        "p50": 2.3400645954085536e-05,
+        "p75": 3.114515885997819e-05,
+        "p95": 5.191603898074931e-05
+      },
+      "episodes_above_0.10": 0.0
+    },
+    "duplicates": {
+      "exact_duplicate_episodes": 0,
+      "near_duplicate_pairs": 0,
+      "near_duplicate_examples": []
+    },
+    "length_seconds": {
+      "p5": 6.7,
+      "p25": 7.175000000000001,
+      "p50": 7.683333333333334,
+      "p75": 8.725,
+      "p95": 9.95
+    },
+    "timestamp_problem_episodes": 0,
+    "tasks": {
+      "distinct": 1,
+      "entropy_bits": -0.0
+    },
+    "source": "lerobot/svla_so101_pickplace@f641879e22172be7e8161d5e6c1503c2d2feb657",
+    "revision": "f641879e22172be7e8161d5e6c1503c2d2feb657"
+  },
+  "lerobot/svla_so100_sorting@13870ca969084d8ce4d8a0391b06cead78e804ba": {
+    "n_episodes": 52,
+    "fps": 30.0,
+    "codebase_version": "v3.0",
+    "robot_type": "so100",
+    "pause": {
+      "tau": 0.055933251246201514,
+      "min_segment_s": 0.5,
+      "episode_rate": 0.8846153846153846,
+      "segment_seconds": {
+        "p5": 0.5333333333333333,
+        "p25": 0.7333333333333333,
+        "p50": 0.9666666666666667,
+        "p75": 1.2333333333333334,
+        "p95": 2.013333333333333
+      },
+      "n_segments": 57,
+      "interior_episode_rate": 0.5,
+      "interior_segment_seconds": {
+        "p5": 0.5333333333333333,
+        "p25": 0.6833333333333333,
+        "p50": 0.9166666666666667,
+        "p75": 1.1833333333333333,
+        "p95": 1.458333333333333
+      },
+      "n_interior_segments": 30,
+      "pause_frame_fraction": {
+        "p5": 0.04214089057771508,
+        "p25": 0.059113598914413104,
+        "p50": 0.07575658319189273,
+        "p75": 0.1027319286871961,
+        "p95": 0.12361282005573937
+      }
+    },
+    "jitter": {
+      "hf_power_share": {
+        "p5": 4.581793188800312e-06,
+        "p25": 6.560263536445946e-06,
+        "p50": 8.685256732809222e-06,
+        "p75": 1.1283245366400736e-05,
+        "p95": 2.1870751036296263e-05
+      },
+      "episodes_above_0.10": 0.0
+    },
+    "duplicates": {
+      "exact_duplicate_episodes": 0,
+      "near_duplicate_pairs": 0,
+      "near_duplicate_examples": []
+    },
+    "length_seconds": {
+      "p5": 19.15,
+      "p25": 21.475,
+      "p50": 23.116666666666667,
+      "p75": 25.05,
+      "p95": 26.99833333333333
+    },
+    "timestamp_problem_episodes": 0,
+    "tasks": {
+      "distinct": 1,
+      "entropy_bits": -0.0
+    },
+    "source": "lerobot/svla_so100_sorting@13870ca969084d8ce4d8a0391b06cead78e804ba",
+    "revision": "13870ca969084d8ce4d8a0391b06cead78e804ba"
+  },
+  "jchandru08/so100_press_red_button@b8544ee7cb9075efbf5f4d2c49f7a6aa93fe0e09": {
+    "n_episodes": 29,
+    "fps": 30.0,
+    "codebase_version": "v2.1",
+    "robot_type": "so100",
+    "pause": {
+      "tau": 0.017578125,
+      "min_segment_s": 0.5,
+      "episode_rate": 0.9655172413793104,
+      "segment_seconds": {
+        "p5": 0.5133333333333333,
+        "p25": 0.5666666666666667,
+        "p50": 0.7333333333333333,
+        "p75": 1.4,
+        "p95": 3.4799999999999973
+      },
+      "n_segments": 69,
+      "interior_episode_rate": 0.896551724137931,
+      "interior_segment_seconds": {
+        "p5": 0.5,
+        "p25": 0.5666666666666667,
+        "p50": 0.7166666666666666,
+        "p75": 1.2666666666666666,
+        "p95": 2.138333333333333
+      },
+      "n_interior_segments": 60,
+      "pause_frame_fraction": {
+        "p5": 0.15526042878606375,
+        "p25": 0.23898305084745763,
+        "p50": 0.2825719120135364,
+        "p75": 0.31810490693739424,
+        "p95": 0.3901520558036742
+      }
+    },
+    "jitter": {
+      "hf_power_share": {
+        "p5": 8.64843667017172e-06,
+        "p25": 1.5143947743032993e-05,
+        "p50": 3.4578016403526696e-05,
+        "p75": 8.376115693822934e-05,
+        "p95": 0.00022818305317648624
+      },
+      "episodes_above_0.10": 0.0
+    },
+    "duplicates": {
+      "exact_duplicate_episodes": 0,
+      "near_duplicate_pairs": 0,
+      "near_duplicate_examples": []
+    },
+    "length_seconds": {
+      "p5": 19.64666666666667,
+      "p25": 19.7,
+      "p50": 19.733333333333334,
+      "p75": 19.733333333333334,
+      "p95": 19.8
+    },
+    "timestamp_problem_episodes": 0,
+    "tasks": {
+      "distinct": 1,
+      "entropy_bits": -0.0
+    },
+    "source": "jchandru08/so100_press_red_button@b8544ee7cb9075efbf5f4d2c49f7a6aa93fe0e09",
+    "revision": "b8544ee7cb9075efbf5f4d2c49f7a6aa93fe0e09"
+  },
+  "SO-101-robot-learning/so101_pick_place@c56fed5bc39d966c25120293b2f6dc3eb5ead5c7": {
+    "n_episodes": 50,
+    "fps": 30.0,
+    "codebase_version": "v3.0",
+    "robot_type": "so_follower",
+    "pause": {
+      "tau": 0.054370606901301424,
+      "min_segment_s": 0.5,
+      "episode_rate": 1.0,
+      "segment_seconds": {
+        "p5": 0.5,
+        "p25": 0.7666666666666667,
+        "p50": 1.5333333333333334,
+        "p75": 1.9,
+        "p95": 2.3333333333333335
+      },
+      "n_segments": 77,
+      "interior_episode_rate": 0.3,
+      "interior_segment_seconds": {
+        "p5": 0.575,
+        "p25": 0.8333333333333334,
+        "p50": 1.2,
+        "p75": 1.9583333333333333,
+        "p95": 2.3666666666666667
+      },
+      "n_interior_segments": 16,
+      "pause_frame_fraction": {
+        "p5": 0.16795918367346938,
+        "p25": 0.21153683838988382,
+        "p50": 0.24467973370390717,
+        "p75": 0.2867791072943677,
+        "p95": 0.32187639071795104
+      }
+    },
+    "jitter": {
+      "hf_power_share": {
+        "p5": 5.222718921859397e-06,
+        "p25": 1.3189115850277485e-05,
+        "p50": 2.1182249057277804e-05,
+        "p75": 3.4367334564497225e-05,
+        "p95": 0.00030394220924020207
+      },
+      "episodes_above_0.10": 0.0
+    },
+    "duplicates": {
+      "exact_duplicate_episodes": 0,
+      "near_duplicate_pairs": 0,
+      "near_duplicate_examples": []
+    },
+    "length_seconds": {
+      "p5": 9.983333333333334,
+      "p25": 10.841666666666667,
+      "p50": 11.783333333333335,
+      "p75": 12.833333333333334,
+      "p95": 14.069999999999999
+    },
+    "timestamp_problem_episodes": 0,
+    "tasks": {
+      "distinct": 1,
+      "entropy_bits": -0.0
+    },
+    "source": "SO-101-robot-learning/so101_pick_place@c56fed5bc39d966c25120293b2f6dc3eb5ead5c7",
+    "revision": "c56fed5bc39d966c25120293b2f6dc3eb5ead5c7"
+  },
+  "kmg0620/so101_bomb_pick_place_v1@309fb9563024bbf6da9c86418f90016c60ebe865": {
+    "n_episodes": 150,
+    "fps": 30.0,
+    "codebase_version": "v3.0",
+    "robot_type": "so_follower",
+    "pause": {
+      "tau": 0.0897607845371835,
+      "min_segment_s": 0.5,
+      "episode_rate": 0.8533333333333334,
+      "segment_seconds": {
+        "p5": 0.5,
+        "p25": 0.6333333333333333,
+        "p50": 0.8500000000000001,
+        "p75": 1.4,
+        "p95": 2.6383333333333323
+      },
+      "n_segments": 218,
+      "interior_episode_rate": 0.8333333333333334,
+      "interior_segment_seconds": {
+        "p5": 0.5,
+        "p25": 0.6333333333333333,
+        "p50": 0.8666666666666667,
+        "p75": 1.4083333333333332,
+        "p95": 2.661666666666666
+      },
+      "n_interior_segments": 204,
+      "pause_frame_fraction": {
+        "p5": 0.00945306876484841,
+        "p25": 0.13109926696883217,
+        "p50": 0.17858191220288958,
+        "p75": 0.21614720795943504,
+        "p95": 0.2850725939487094
+      }
+    },
+    "jitter": {
+      "hf_power_share": {
+        "p5": 0.0004562973073634778,
+        "p25": 0.0006463403489315581,
+        "p50": 0.0008333948052202664,
+        "p75": 0.0012861327689935927,
+        "p95": 0.4057618949896124
+      },
+      "episodes_above_0.10": 0.14666666666666667
+    },
+    "duplicates": {
+      "exact_duplicate_episodes": 0,
+      "near_duplicate_pairs": 0,
+      "near_duplicate_examples": []
+    },
+    "length_seconds": {
+      "p5": 12.915000000000001,
+      "p25": 15.425,
+      "p50": 17.71666666666667,
+      "p75": 20.59166666666667,
+      "p95": 33.39666666666665
+    },
+    "timestamp_problem_episodes": 22,
+    "tasks": {
+      "distinct": 1,
+      "entropy_bits": -0.0
+    },
+    "source": "kmg0620/so101_bomb_pick_place_v1@309fb9563024bbf6da9c86418f90016c60ebe865",
+    "revision": "309fb9563024bbf6da9c86418f90016c60ebe865"
+  }
+}
