@@ -650,3 +650,26 @@ def compare_entrants_d026(
                           "significant": o.significant},
         ))
     return out, vc
+
+
+INCONCLUSIVE_MDE = 0.10  # docs/preregistration.md section 8
+
+
+def t_ci95(diff: float, se: float, df: float) -> tuple[float, float]:
+    """Primary 95% CI from the D-026 statistic: diff +/- t(df, 0.975) * SE."""
+    q = float(sps.t.ppf(0.975, df)) if df > 0 else float("inf")
+    return diff - q * se, diff + q * se
+
+
+def outcome_label(diff: float, ci: tuple[float, float], significant: bool, mde: float | None,
+                  inconclusive_mde: float = INCONCLUSIVE_MDE) -> str:
+    """Pre-registered labels (docs/preregistration.md section 8)."""
+    if significant:
+        return "positive" if diff > 0 else "negative"
+    crosses = ci[0] <= 0 <= ci[1]
+    if mde is not None and mde > inconclusive_mde and crosses:
+        return "inconclusive"
+    if mde is not None and mde <= inconclusive_mde:
+        return "no detectable effect"
+    return "inconclusive"
+

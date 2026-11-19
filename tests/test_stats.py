@@ -398,3 +398,15 @@ def test_power_large_noncentrality_regression():
     d = S.Design(n_c=3, K=8, n_p=2, R=3)
     assert S.subset_power(0.2, 0.03, 0.05, d) == pytest.approx(1.0, abs=1e-3)
     assert 0 < S.subset_mde(0.03, 0.05, d) < 0.2
+
+
+def test_preregistered_outcome_labels():
+    """docs/preregistration.md section 8."""
+    from robocurate.report.stats import outcome_label, t_ci95
+
+    lo, hi = t_ci95(0.1, 0.02, 7)
+    assert lo < 0.1 < hi and abs((hi - 0.1) - 2.3646 * 0.02) < 1e-3
+    assert outcome_label(0.2, (0.1, 0.3), True, 0.15) == "positive"
+    assert outcome_label(-0.2, (-0.3, -0.1), True, 0.15) == "negative"
+    assert outcome_label(0.01, (-0.05, 0.07), False, 0.08) == "no detectable effect"
+    assert outcome_label(0.05, (-0.1, 0.2), False, 0.18) == "inconclusive"

@@ -150,6 +150,10 @@ def _comparisons(entrants: dict[str, list[float]], placebo: list[list[float]],
     mde = {"tau": tau, "s_sub": vc.s_sub, "s_seed": vc.s_seed, "s_sub_truncated": vc.truncated, "K": vc.K,
            "n_p": n_p, "n_c": n_c, "n_comparisons": m, "power": 0.8, "df": vc.K - 1, "test": "d026",
            "mde": S.balanced_mde(tau, 0.0, max(1, n_p), vc.K, 1, alpha, 0.8, m)}
+    for d in comps:  # pre-registered outcome labels (docs/preregistration.md section 8)
+        d["ci95"] = list(S.t_ci95(d["diff"], d["se"], d["df"]))
+        d["mde"] = mde["mde"]
+        d["label"] = S.outcome_label(d["diff"], tuple(d["ci95"]), d["significant"], mde["mde"])
     return comps, out_refs, mde
 
 
@@ -298,14 +302,16 @@ def render_markdown(a: dict[str, Any], plot_name: str | None, n_files: int) -> s
         L.append("")
         if b["cleaner_vs_placebo"]:
             L += ["**Entrants vs placebo (primary, D-026; Holm across entrants)**", "",
-                  "| entrant | diff | SE | t | df | p (raw) | p (Holm) | significant | D-016 p (Holm, secondary) "
-                  "| Welch p (Holm, secondary) |",
-                  "|---|---|---|---|---|---|---|---|---|---|"]
+                  "| entrant | diff | 95% CI | SE | t | df | p (raw) | p (Holm) | significant | label | "
+                  "D-016 p (Holm, secondary) | Welch p (Holm, secondary) |",
+                  "|---|---|---|---|---|---|---|---|---|---|---|---|"]
             for c in b["cleaner_vs_placebo"]:
                 w = c.get("welch_secondary") or {}
                 v = c.get("vc_secondary") or {}
-                L.append(f"| {c['name']} | {c['diff']:+.3f} | {c['se']:.3f} | {c['t']:.2f} | {c['df']:.0f} | "
-                         f"{c['p_raw']:.2g} | {c['p_holm']:.2g} | {'YES' if c['significant'] else 'no'} | "
+                lo, hi = c.get("ci95") or (float("nan"), float("nan"))
+                L.append(f"| {c['name']} | {c['diff']:+.3f} | [{lo:+.3f}, {hi:+.3f}] | {c['se']:.3f} | {c['t']:.2f} | "
+                         f"{c['df']:.0f} | {c['p_raw']:.2g} | {c['p_holm']:.2g} | "
+                         f"{'YES' if c['significant'] else 'no'} | {c.get('label', '')} | "
                          f"{_fmt(v.get('p_holm'), 3)} | {_fmt(w.get('p_holm'), 3)} |")
             L.append("")
         if b["reference_vs_placebo"]:

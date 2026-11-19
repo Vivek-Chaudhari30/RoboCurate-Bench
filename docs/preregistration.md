@@ -87,7 +87,7 @@ There is one hypothesis per (entrant, task). No other comparison is confirmatory
 | env | ALOHA sim transfer-cube (`aloha`, `AlohaTransferCube-v0`) | PushT (`pusht`, `PushT-v0`) |
 | policy | ACT | Diffusion Policy |
 | task config | `configs/tasks/aloha_transfer_cube.yaml` | `configs/tasks/pusht_diffusion.yaml` |
-| launch grid | `configs/grids/task_a_v0.yaml` (to be re-issued with K = 8 and every enabled entrant before the freeze) | `configs/grids/pusht_diffusion_v0.yaml` |
+| launch grid | `configs/grids/task_a_v1.yaml` (K = 8, every enabled entrant, RA-BC with 8 permutations) | `configs/grids/pusht_diffusion_v0.yaml` (K = 8, every enabled selection entrant) |
 | mixture | `configs/mixtures/task_a_v1.yaml` | `configs/mixtures/pusht_diffusion_v1.yaml` (proposal) |
 | mixture content | 50 scripted (10 of them replay-mode perturbed: 5 jitter, 5 failed grasp), 50 human, 100 policy rollouts from full-data ACT checkpoints at 10/30/60/100% of training (25 each, successes and failures kept) | all 206 human demos + 100 policy rollouts (same checkpoint fractions) |
 | post-hoc defects | interior pauses on 50% of episodes, 0.62–1.20 s; duplicates at rate 0 (observed medians, docs/defect_validation.md); no wrong-task strings | same rates; pauses 6–12 frames at 10 fps |
@@ -131,7 +131,8 @@ The MDE is the effect with 80% power at the measured variance components (Bonfer
   are unlikely.
 - **Inconclusive:** the primary 95% CI crosses 0 and the MDE is > 10 percentage points.
 
-The MDE is reported with every label. Negative and null results are reported exactly like positive ones (CLAUDE.md
+The MDE is reported with every label. The report computes the CI, the MDE and the label for every entrant
+(`robocurate report`: `ci95`, `mde` and `label` in leaderboard.json, plus a `label` column in report.md). Negative and null results are reported exactly like positive ones (CLAUDE.md
 rule 9).
 
 ## 9. Values fixed from M0, before any entrant run
