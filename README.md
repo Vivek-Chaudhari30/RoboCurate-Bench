@@ -108,6 +108,11 @@ To submit your own cleaner, see [docs/submit.md](docs/submit.md).
   3 seeds, below the 0.8 pass bar, with a near-singular TRAK Gram matrix. It therefore stays disabled on every task
   (PROGRESS.md, CUPID sanity investigation and CUPID diffusion toybed).
 
+## License
+
+Apache-2.0 (D-038; [LICENSE](LICENSE), the canonical text from apache.org), matching LeRobot. Wrapped optional
+tools (the `[checkers]` extra) keep their own licenses and are never vendored.
+
 ## Credits
 
 Verified on 2026-11-19 against the arXiv API, the venue pages, Crossref or PyPI. BibTeX:

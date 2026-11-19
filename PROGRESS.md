@@ -8,6 +8,7 @@ retried later, items that need the Hub continue when it is back.
 | UTC | item | what changed | tests | outcome |
 |---|---|---|---|---|
 | 2026-11-19T21:25Z | 1 decisions | D-033..D-038 appended verbatim; protocol.yaml generation_seed_range [700000, 799999] (D-034) and eval_batch_size {pusht_diffusion: TBD} (D-035); ProtocolConfig fields + disjointness check + task_eval_batch_size(); data-generation rollouts (mixture.policy_rollout_seeds) moved from curation seeds to generation seeds | default 260 passed + 1 skipped + 1 xfailed (2 seed tests updated, 2 new protocol tests); ruff clean | done |
+| 2026-11-19T21:29Z | 2 deps + license | [pusht] extra pinned: gym-pusht 0.1.8, pymunk 6.11.1, diffusers 0.39.0 (the D-030 venv versions) + opencv-python 4.13.0.92 (gym-pusht needs opencv-python; pinned to the locked opencv-python-headless version because both ship cv2 and lerobot needs <4.14; the venv had 4.14.0.94). Installed into rcb: freeze diff = 11 additions, 0 changes; cv2 still 4.13.0; pip check clean. ONE lock: requirements.lock regenerated (pip freeze --exclude-editable). PushT env test now a hard import (runs, passes). LICENSE = apache.org text, sha256 cfc7749b...3d30, identical on www.apache.org, apache.org and 5 copies shipped by other packages; pyproject license = "Apache-2.0" (SPDX) + license-files, build-system setuptools>=77; README License section | default 263 passed + 1 xfailed (0 skipped); build: no deprecation, License-Expression Apache-2.0, twine PASSED x2; ruff clean | done |
 <!-- cpu2-log -->
 
 ## Morning summary (non-GPU completion)

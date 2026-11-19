@@ -1,8 +1,7 @@
 """Task B (D-030): PushT + Diffusion Policy. CPU only.
 
-The PushT env needs lerobot's `pusht` extra (gym-pusht, pymunk; METADATA:260-262), which is NOT in
-requirements.lock; the env test is skipped where it is not installed and was run in a scratch venv
-(PROGRESS.md, "Task B setup")."""
+The PushT env needs the `[pusht]` extra (gym-pusht, pymunk, diffusers, opencv-python; pyproject.toml), which is in
+requirements.lock since overnight 3 (item 2), so the env test runs in the default suite."""
 
 from pathlib import Path
 
@@ -85,7 +84,7 @@ def test_pusht_metadata_loads_on_cpu(scratch_env):
 
 
 def test_pusht_env_reset_render_cpu():
-    pytest.importorskip("gym_pusht", reason="lerobot[pusht] extra not installed in this env (not in the lock)")
+    import gym_pusht  # noqa: F401  the [pusht] extra is locked; a missing install must FAIL, not skip
     from lerobot.envs.factory import make_env, make_env_config
 
     envs = make_env(make_env_config("pusht"), n_envs=1)
