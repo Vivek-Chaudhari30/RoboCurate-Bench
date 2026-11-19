@@ -133,6 +133,7 @@ class LeRobotRolloutBackend:
         from lerobot.envs.factory import make_env, make_env_config, make_env_pre_post_processors
         from lerobot.policies import make_policy, make_pre_post_processors
         from lerobot.scripts.lerobot_eval import rollout
+        from lerobot.utils.constants import OBS_STATE  # "observation.state", utils/constants.py:23
 
         path = str(policy)  # a checkpoint directory (pretrained_model)
         env_cfg = make_env_config(self.env_type, task=self.env_task)
@@ -152,13 +153,17 @@ class LeRobotRolloutBackend:
             env = next(iter(next(iter(envs.values())).values()))
             with torch.no_grad():
                 d = rollout(env=env, policy=pol, env_preprocessor=env_pre, env_postprocessor=env_post,
-                            preprocessor=pre, postprocessor=post, seeds=chunk)
+                            preprocessor=pre, postprocessor=post, seeds=chunk, return_observations=True)
             done_idx = torch.argmax(d["done"].to(int), dim=1)
             n_steps = d["done"].shape[1]
             mask = (torch.arange(n_steps)[None, :] <= (done_idx + 1)[:, None]).int()
             succ = (d["success"] * mask).any(dim=1)
+            obs_state = d["observation"].get(OBS_STATE)  # (batch, seq + 1, dim), scripts/lerobot_eval.py:189-191
             for j, s in enumerate(chunk):
-                out.append(RolloutResult(int(s), bool(succ[j]), int(done_idx[j]) + 1,
-                                         actions=d["action"][j, : int(done_idx[j]) + 1].cpu().numpy()))
+                L = int(done_idx[j]) + 1
+                out.append(RolloutResult(
+                    int(s), bool(succ[j]), L,
+                    states=None if obs_state is None else obs_state[j, :L].cpu().numpy(),
+                    actions=d["action"][j, :L].cpu().numpy()))
             env.close()
         return out

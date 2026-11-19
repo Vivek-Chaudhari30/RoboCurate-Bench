@@ -20,6 +20,16 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest==9.2.0", "ruff==0.17.5"]
+# Wrapped open-source checkers (m1-core item 5a). Pinned exactly; NOT part of requirements.lock (the core env).
+# trajlens 0.4.0 is excluded (requires pyarrow<25, lock pins 26.0.1); retake is excluded (upgrades numpy/pandas/
+# huggingface_hub/pillow, calls external LLM APIs). Dry-run installs on 2026-11-19 added only rich,
+# markdown-it-py and mdurl to the core env (no version changes).
+checkers = [
+    "lerobot-doctor==0.2.0",
+    "kinema==0.1.0",
+    "roboaudit==0.3.1",
+    "robot-data-audit @ git+https://github.com/liesliy/rda@47c69459e201cdc1f509f84b027c2407ab949e30",
+]
 
 [project.scripts]
 robocurate = "robocurate.cli:main"

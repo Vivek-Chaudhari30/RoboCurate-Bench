@@ -68,3 +68,32 @@ class RobometerProgress:  # pragma: no cover - needs GPU + model weights
         if missing:
             raise RuntimeError(f"Robometer parquet lacks episodes {sorted(missing)[:5]}...")
         return {i: prog[i] for i in view.episode_indices}
+
+
+class CachedProgress:
+    """Score cache keyed by dataset hash + model revision (m1-core item 5b): one progress pass is shared by
+    every entrant that uses the same model on the same data (robometer_filter, rabc, rcb_score)."""
+
+    def __init__(self, model: Any, cache_dir: str | Path):
+        self.model, self.cache_dir = model, Path(cache_dir)
+        self.revision = model.revision
+        self.hits = 0
+
+    def path(self, view: DatasetView) -> Path:
+        import hashlib
+
+        h = hashlib.sha256(f"{view.fingerprint()}|{self.revision}".encode()).hexdigest()[:24]
+        return self.cache_dir / "_progress_cache" / f"{h}.npz"
+
+    def episode_progress(self, view: DatasetView) -> dict[int, np.ndarray]:
+        p = self.path(view)
+        if p.exists():
+            self.hits += 1
+            z = np.load(p)
+            return {int(k): z[k] for k in z.files}
+        out = self.model.episode_progress(view)
+        p.parent.mkdir(parents=True, exist_ok=True)
+        tmp = p.with_suffix(".tmp.npz")
+        np.savez(tmp, **{str(k): v for k, v in out.items()})
+        tmp.replace(p)
+        return out

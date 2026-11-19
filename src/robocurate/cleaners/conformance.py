@@ -110,6 +110,8 @@ def _source_for_target(target: str) -> tuple[str, str, bool, Path | None]:
     if mod in registry.BUILTINS:
         cls = registry.BUILTINS[mod]
         mod = cls.__module__
+    elif mod in registry.ENTRANTS:
+        mod = registry.ENTRANTS[mod].split(":", 1)[0]
     else:
         eps = registry.plugin_entry_points()
         if mod in eps:

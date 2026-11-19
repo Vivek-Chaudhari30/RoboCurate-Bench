@@ -26,7 +26,7 @@ import numpy as np
 from robocurate.cleaners import registry
 from robocurate.cleaners.base import Cleaner, WeightingCleaner, budget_count, validate_resources
 from robocurate.curation.context import CurationContext, ReferencePolicy
-from robocurate.curation.progress import MockProgressModel
+from robocurate.curation.progress import CachedProgress, MockProgressModel
 from robocurate.curation.rollouts import RolloutResult, RolloutService
 from robocurate.curation.weights import permute_progress, write_progress_parquet
 from robocurate.data.episodes import DatasetView, synthetic_view
@@ -119,7 +119,7 @@ def fake_reference_policy(view: DatasetView, cache_dir: Path) -> ReferencePolicy
 def fake_context_factory(protocol: Any, view: DatasetView, cache_dir: Path) -> Callable[[Cleaner], CurationContext]:
     def make(cleaner: Cleaner) -> CurationContext:
         e0 = next(iter(view))
-        ctx = CurationContext(backend="fake", progress_model=MockProgressModel())
+        ctx = CurationContext(backend="fake", progress_model=CachedProgress(MockProgressModel(), cache_dir))
         if cleaner.requires_rollouts:
             ctx.rollouts = RolloutService.from_protocol(
                 protocol, FakeRolloutBackend(e0.state.shape[1], e0.actions.shape[1]), cap=cleaner.requires_rollouts)

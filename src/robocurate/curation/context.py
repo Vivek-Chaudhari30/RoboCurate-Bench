@@ -5,6 +5,8 @@ CurationContext fields:
   rollouts          RolloutService (only if the cleaner declares requires_rollouts > 0)
   reference_policy  ReferencePolicy (only if requires_reference_policy): read-only full-data checkpoint
   progress_model    ProgressModel provider (Robometer on GPU hosts; a deterministic mock in fake/test mode)
+  dataset_root      read-only path of the LeRobot dataset the view was built from (checker adapters only; the
+                    labels sidecar lives BESIDE this directory, never inside it, D-008)
   device            torch device string
 """
 
@@ -81,5 +83,6 @@ class CurationContext:
     rollouts: Any = None
     reference_policy: ReferencePolicy | None = None
     progress_model: Any = None
+    dataset_root: Path | None = None
     device: str = "cpu"
     extra: dict[str, Any] = field(default_factory=dict)

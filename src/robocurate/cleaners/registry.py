@@ -19,6 +19,21 @@ from robocurate.cleaners.builtin import LengthHeuristic, RandomSubset
 ENTRY_POINT_GROUP = "robocurate.cleaners"
 BUILTINS: dict[str, type[Cleaner]] = {c.name: c for c in (RandomSubset, LengthHeuristic)}
 
+# Launch entrants (m1-core item 5), imported lazily so heavy/optional dependencies load only when used.
+_E = "robocurate.cleaners.entrants"
+ENTRANTS: dict[str, str] = {
+    "lerobot_doctor": f"{_E}.checkers:LerobotDoctor",
+    "kinema": f"{_E}.checkers:Kinema",
+    "roboaudit": f"{_E}.checkers:RoboAudit",
+    "rda": f"{_E}.checkers:RDA",
+    "robometer_filter": f"{_E}.robometer:RobometerFilter",
+    "rabc": f"{_E}.robometer:RABC",
+    "rcb_score": f"{_E}.rcb_score:RCBScore",
+    "demo_score": f"{_E}.demo_score:DemoScore",
+    "deminf": f"{_E}.deminf:DemInf",
+    "cupid": f"{_E}.cupid:Cupid",
+}
+
 
 class RegistryError(LookupError):
     pass
@@ -38,12 +53,21 @@ def plugin_entry_points() -> dict[str, metadata.EntryPoint]:
 
 
 def available() -> list[str]:
-    return sorted(set(BUILTINS) | set(plugin_entry_points()))
+    return sorted(set(BUILTINS) | set(ENTRANTS) | set(plugin_entry_points()))
+
+
+def _load_entrant(target: str):
+    import importlib
+
+    mod, attr = target.split(":")
+    return getattr(importlib.import_module(mod), attr)
 
 
 def get(name: str, version: str | None = None) -> Cleaner:
     if name in BUILTINS:
         inst = instantiate(BUILTINS[name])
+    elif name in ENTRANTS:
+        inst = instantiate(_load_entrant(ENTRANTS[name]))
     else:
         eps = plugin_entry_points()
         if name not in eps:
