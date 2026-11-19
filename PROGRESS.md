@@ -1,5 +1,96 @@
 # PROGRESS
 
+## Morning summary (overnight m1-core)
+
+Branch `m1-core` (from `m0-calibration` @ `0218b8c`), pushed after every item. Overnight run 2026-11-19
+06:19–07:30 UTC, about 1.2 h of the 10 h budget; CPU only; GPU-h 0. m0-calibration and main were not touched.
+
+**Items: 10 of 10 done, 0 blocked.** Two acceptance gaps are inherited or depend on a permission, listed below:
+the slow suite has one failing test (B-003), and the checker adapters have never run because the tools were never installed.
+
+| item | commit |
+|---|---|
+| 1 decisions D-020..D-023, protocol additions, weighting-track config | `c97155c` |
+| 2 D-021 tie-break; mixture shuffle verified | `4fad1bd` |
+| 3 curation infra (prepare cache, rollout service, reference policy, RA-BC wiring) | `bcf182f` |
+| 4 toybed | `909d60c`, `63f3eb4` |
+| 5 entrants | `1052270` |
+| 6 policy-rollout mixture source | `d1f983c` |
+| 7 validate-defects + docs/defect_validation.md | `90fec7f` |
+| 8 D-019 report, `report --site`, `reproduce`, CI | `c5fa733` |
+| 9 cleaner template, docs/submit.md | `c8a5f06`, `02567e5` |
+| 10 README draft, docs/task_b_readiness.md | `7614d81` |
+
+**Tests (Mac, CPU):**
+- default (`not gpu and not slow and not integration`, = CI): **197 passed, 1 xfailed**
+- integration: **3 passed**
+- slow: **10 passed, 1 failed** (12 min). The failure is `test_primary_test_null_calibration`: B-003, the K=8, n_p=1 cell, inherited and intended. It includes the DemInf sanity + conformance tests, the template install test and the help-flag test.
+- ruff: clean
+- import-graph tests: cleaners/ and curation/ cannot reach eval/, labels or oracle (pass)
+
+**Entrants:**
+
+| entrant | track | impl. | source | resources | toybed sanity (published defaults) |
+|---|---|---|---|---|---|
+| lerobot_doctor | selection | wrapped | PyPI 0.2.0 | dataset_root | not run (tool not installed); mapping unit-tested |
+| kinema | selection | wrapped | PyPI 0.1.0 | dataset_root | not run (tool not installed); mapping unit-tested |
+| roboaudit | selection | wrapped | PyPI 0.3.1 | dataset_root | not run (tool not installed); mapping unit-tested |
+| rda | selection | wrapped | liesliy/rda@47c6945 | dataset_root | not run (tool not installed); mapping unit-tested |
+| robometer_filter | selection | wrapped (LeRobot) | rewards/robometer | gpu | pass (mock progress) |
+| rabc | weighting | wrapped (LeRobot RA-BC) | rewards/sarm/rabc.py | gpu | pass (mock progress) |
+| rcb_score v1 | selection | original, frozen (digest test) | D-023 | gpu | pass (mock progress) |
+| demo_score | selection | reimplementation | arXiv 2503.03707 §IV | 100 rollouts, ref policy | pass: keeps 2/8 wrong-direction vs 18/30 clean |
+| deminf | selection | reimplementation | arXiv 2502.08623 §V | none | pass (slow: 222 s at 50k VAE steps): keeps 1/8 wrong, 0/6 jitter, 18/30 clean, and **6/6 pause** |
+| cupid | selection | reimplementation | arXiv 2506.19121 Def. 1, Eq. 2-5 | 100 rollouts, ref policy | **FAILS** with defaults (keeps 5/8 wrong); strict xfail; plumbing tests pass |
+
+`submit` conformance passes for robometer_filter, rabc, rcb_score, demo_score and cupid (default suite), and for
+deminf (slow). The checkers cannot pass `submit` until installed and given a dataset_root.
+
+**Checker availability:**
+
+| tool | where | license | installs? | adapter |
+|---|---|---|---|---|
+| lerobot-doctor | PyPI 0.2.0 | Apache-2.0 | dry-run OK (+rich, markdown-it-py, mdurl) | yes. Reports at most 20 flagged episodes, lowest indices first: an index-order bias |
+| kinema | PyPI 0.1.0 | Apache-2.0 | dry-run OK | yes (FAIL→2, WARN→1, count of WARN+) |
+| roboaudit | PyPI 0.3.1 | MIT | dry-run OK, no new deps | yes (exclude/review/keep) |
+| RDA | GitHub liesliy/rda@47c6945 | MIT | dry-run OK, no new deps | yes (EXCLUDE/REVIEW/UNVERIFIABLE/PASS, combined_score) |
+| trajlens | PyPI 0.4.0 | Apache-2.0 | conflicts: needs pyarrow<25 (lock 26.0.1) | no |
+| retake | GitHub TheNandinee/retake (PyPI name is an unrelated package) | Apache-2.0 | would upgrade numpy/pandas/huggingface_hub/pillow; calls external LLM APIs | no |
+
+Common mapping: flagged episodes rank last, then the tool's own score, ties per D-021.
+
+**Defect validation** (5 pinned SO-100/101 datasets, 331 episodes, parquet only):
+- Interior pauses appear in 6–90% of episodes, median segment 0.6–1.2 s. Ours: 11% of episodes at 0.5–1.5 s.
+  Our lengths are realistic; our rate is low.
+- Duplicates: 0 exact and 0 near-duplicates observed. Ours: 7%.
+- Jitter above 0.10 occurs only in one dataset (15% of its episodes).
+- Timestamp gaps in 22/150 episodes of one dataset.
+- All five datasets are single-task.
+
+**hokkaido (read-only, start and end):** no tmux session for this user, so `rcb-m0` does not exist. M0 was never
+launched: the previous task stopped at B-003. There is no M0 log path. The GPU was busy with another user's job
+(start: 66% / 27.6 GB; end: 100% / 27.6 GB).
+
+**Needs Vivek's decision:**
+1. **B-003 (still open):** require n_p ≥ 2 for result runs, or build the parametric-bootstrap fallback. Until then
+   the slow suite has one failing test by design. M0 is still not launched.
+2. **Checker install:** installing `.[checkers]` into the shared env was blocked by the permission system. Run
+   `pip install -e ".[checkers]" --no-deps` plus the 3 small deps, or approve it, then run the adapters once on a real
+   dataset.
+3. **Weighting placebo interpretation (D-020):** RA-BC weights are per frame, so we permute each episode's
+   progress *curve* across episodes, time-resampled. Confirm.
+4. **Weighting-track Holm family** is separate from the selection track. Confirm.
+5. **rcb-score v1 uses final-frame Robometer progress, not success probability.** Lerobot 0.6.1 exposes only a
+   0.5-thresholded success. It is frozen as v1 in code. If you want success probability, that is v2 (D-023).
+6. **CUPID fails its toy sanity check with defaults.** On the toy, 786 training samples < d = 4000, so H = ΦᵀΦ is
+   singular. Influence also comes from 100 stochastic rollouts. Keep it as an entrant as-is (reported), or decide on
+   an investigation (no tuning)?
+7. **Declared adaptations** for Demo-SCORE (one reference checkpoint, 80/20 rollout split, top-k instead of a
+   threshold, no rollout augmentation) and CUPID (stochastic rollout policy with σ = RMS BC residual). Accept?
+8. **The report now uses D-019 as primary** (D-019 is accepted; its n_p = 1 calibration gap is B-003). OK?
+
+**Next step:** decide B-003. Then launch M0 (Part 2–4 of the M0 task) when hokkaido's GPU is free.
+
 **Current milestone: M0 — BLOCKED at D-019 calibration (B-003: K=8, n_p=1 cell misses the 0.06 bound); GPU work not started**
 
 ## Blocked
@@ -148,6 +239,7 @@ Started 2026-11-19T06:19:12Z. Hokkaido read-only check at start: no tmux session
 | 2026-11-19T07:09Z | 8 reproduce, site, CI | (next) | default (CI selection) 197 passed + 1 xfailed; ruff clean; CI YAML valid, its commands run locally | report switched to the D-019 primary test (Welch = labeled secondary), weighting-track analysis (Holm across weighting entrants, full data as reference), variance components + MDE, curation cost, cell ids. robocurate report --site (single self-contained HTML + leaderboard.json, FAKE watermark). robocurate reproduce <cell> (resolves git hash, configs+sha256, selection keys; prints commands; fake re-execution MATCH 6/6). .github/workflows/ci.yml (ubuntu-24.04, Python 3.12.16, exact lock with CPU torch wheels, ruff + default suite minus integration). Bugs fixed with regression tests: second report on the same dir loaded leaderboard.json as a run; in-process CLI calls recorded the caller's sys.argv as the command line. Outputs pasted above (m1-core end-to-end section). |
 | 2026-11-19T07:10Z | 9 submission path | (next) | template install test (slow) passed; ruff clean | examples/cleaner_template (installable package, robocurate.cleaners entry point, README); docs/submit.md (tracks, access rules, resource declarations, submit checks, how results are produced); tests/test_submission_template.py installs the template into a throwaway venv (--system-site-packages, --no-deps --no-index) and passes robocurate submit. |
 | 2026-11-19T07:11Z | 10 README + Task B readiness | (next) | ruff clean; README quickstart submit command run | README draft (pitch, protocol D-002/D-016/D-019/D-020 in plain language, architecture, entrants, fake quickstart, Results: pending, limitations, credits with TODO / VERIFY CITATION markers: CuraEval not found, QoQ code not found). docs/task_b_readiness.md: pusht env registered (configs.py:191, extra gym-pusht not installed), metaworld registered (configs.py:454, metaworld==3.0.0 not installed; scripted experts via metaworld.policies, envs/metaworld.py:24,67-73,107), no robomimic env in lerobot; Hub datasets + formats + revisions; robomimic mh only as official hdf5. |
+| 2026-11-19T07:24Z | 11 morning summary | (this commit) | default 197+1 xfailed; integration 3; slow 10 passed, 1 failed (B-003, inherited); ruff clean | Morning summary at the top of PROGRESS.md; LeRobot touchpoints + method sources sections; parking lot (QoQ, DataMIL, CUPID ACT adapter, trajlens). Hokkaido end check: no rcb-m0 session (never launched), GPU 100% / 27.6 GB used by another user. |
 <!-- m1-log-end -->
 
 ## m1-core end-to-end (fake backend): prepare + run + report --site + reproduce, task_a_v0 incl. weighting track
@@ -375,6 +467,62 @@ when it is empty (tested). No lerobot-train or lerobot-eval job was run; only th
   (`envs/utils.py:487-493`).
 - **Video:** no disable flag; `max_episodes_rendered = 0 if recording else 10` (`scripts/lerobot_eval.py:785`).
 
+### New touchpoints (m1-core)
+- **Sample weighting (weighting track):**
+  - `TrainPipelineConfig.sample_weighting: SampleWeightingConfig | None` (`configs/train.py:139`; legacy
+    `use_rabc` migration `:61-73`).
+  - `SampleWeightingConfig` fields: type, progress_path, head_mode, kappa 0.01, epsilon 1e-6
+    (`utils/sample_weighting.py:76-100`).
+  - `make_sample_weighter` supports only `rabc` and `uniform` (`:103-132`; no plugin hook). Its RABC builder reads
+    `policy.config.chunk_size` (`:155`).
+  - Created in training at `scripts/lerobot_train.py:406-418`. Weighted loss is `sum(w*l)/(sum(w)+eps)` (`:162`).
+- **RABCWeights** (`rewards/sarm/rabc.py:59`):
+  - Parquet columns: index, episode_index, `progress_<head_mode>` (`:101-126`).
+  - Global delta stats `:143-173`; delta over chunk_size, clamped at the episode end `:237-260`.
+  - SARM Eq. 8-9 `:262-295`; per-batch normalization to sum = batch size `:230-233`.
+- **Robometer:**
+  - `compute_robometer_progress(dataset_repo_id, reward_model_path, output_path, device, ...)`
+    (`rewards/robometer/compute_rabc_weights.py:103`).
+  - It loads the dataset by repo_id only (`:133`) and writes the RA-BC schema with `progress_sparse` (`:193-201`).
+  - `compute_reward` returns clamped progress, or a 0.5-thresholded success (`modeling_robometer.py:249-283`).
+  - Config: `reward_output` "progress"/"success", `success_threshold` 0.5, default `pretrained_path`
+    `lerobot/Robometer-4B` (`configuration_robometer.py:53,59-60`).
+- **Env rollouts (curation/rollouts.py, GPU path only):**
+  - `make_env_config` (`envs/factory.py:26`), `make_env_pre_post_processors` (`:37`), `make_env` (`:58`).
+  - `lerobot_eval.rollout(..., seeds, return_observations)` (`scripts/lerobot_eval.py:167`; observations
+    `(b, seq+1, *)` `:189-191, 402-406`). Success reduction mirrors `:534-560`; setup mirrors `:753-783`.
+  - `OBS_STATE` (`utils/constants.py:23`), `PreTrainedConfig.from_pretrained` (`configs/policies.py:172`),
+    `make_pre_post_processors` (`policies/factory.py:150`), `make_policy` (`:240`).
+- **Task B facts:**
+  - pusht env `envs/configs.py:191`; metaworld env `:454`, `envs/metaworld.py:286`.
+  - MetaWorld scripted experts: `envs/metaworld.py:24, 67-73, 107`.
+  - Extras: `lerobot-0.6.1.dist-info/METADATA:260-271`.
+
+## Method sources (m1-core entrants)
+- **CUPID** (reimplementation): Agia et al., arXiv 2506.19121v2.
+  - Paper: Def. 1, Eq. 2-5, App. A.1-A.2 (TRAK, d = 4000, Gauss-Newton, no damping), Sec. 6 / App. B.4 (m = 100).
+  - Reference code github.com/agiachris/cupid@2941eba9427a3398d3cbe26b10c01e3ece56bd18 (MIT):
+    `scripts/train/train_trak.sh:309,311,315`; `diffusion_policy/common/error_util.py:17-19, 311-330`
+    ("net", "sum_of_sum"); `notebooks/data_curation.ipynb` cell 5.
+- **DemInf** (reimplementation): Hejna et al., arXiv 2502.08623v3.
+  - Paper: Sec. V-A/B/C, App. D, Table I (RoboMimic state: z_s 12, z_a 6).
+  - Reference code github.com/jhejna/demonstration-information@232151defb258b5ceb0a6b62644574b57d981b58 (MIT):
+    `scripts/quality/quality_estimators.py:39-55, 89-90, 165, 171`; `estimate_quality.py:39`;
+    `configs/quality/vae_robomimic_state.py:32-35, 91, 94, 104`.
+- **Demo-SCORE** (reimplementation; repo has no license): Chen, Lessing et al., arXiv 2503.03707v2, Sec. IV-A/B,
+  App. A-B. Reference code github.com/alessing/demo-score@b82a5ece97b8975643b14703734afa8f24ab7b0a:
+  - `demo_score/demo_score/train_stepwise_classifier.py:73-74` (num_eps 3000, hidden [8,8], dropout 0.3, lr 1e-4,
+    wd 0.1, batch 1024), `:172` (code-only class weighting, not used), `:187`.
+  - `filters/classifier_filter_lerobot.py:65-72`.
+- **RA-BC**: lerobot `rewards/sarm/rabc.py` (SARM arXiv 2509.25358, Eq. 8-9). **Robometer**: lerobot
+  `rewards/robometer`.
+- **KSG**: Kraskov et al. 2004.
+- **Checkers** (inspected read-only from published artifacts; not installed):
+  - lerobot-doctor 0.2.0 (PyPI, Apache-2.0).
+  - kinema 0.1.0 (PyPI, Apache-2.0).
+  - roboaudit 0.3.1 (PyPI, MIT).
+  - robot-data-audit 0.12.5 = github.com/liesliy/rda@47c69459e201cdc1f509f84b027c2407ab949e30 (MIT).
+
 ## Deviations from the task prompt
 - Installed `lerobot[aloha,training,evaluation]` rather than only `[aloha]` (needed for `--help`).
 - Null FWER test: 20 000 grids at the D-015 floor of 6 seeds (prompt: 1000 grids, 3 seeds). The 3-seed version
@@ -386,6 +534,11 @@ when it is empty (tested). No lerobot-train or lerobot-eval job was run; only th
 - `task.batch_size` and `task.eval_batch_size` set to TBD (hyperparameters = protocol decisions).
 
 ## Parking lot
+- QoQ (Lee et al., arXiv 2603.09056, ICRA 2026; no official code found) and DataMIL (Dass et al., arXiv 2505.09603,
+  github.com/UT-Austin-RobIn/datamil, MIT) entrants: not implemented (m1-core scope).
+- A loss(batch) adapter so CUPID can run on LeRobot PreTrainedPolicy (ACT); a reserved seed block for the
+  policy-rollout mixture source instead of the top of the curation range.
+- trajlens adapter via an isolated venv CLI (its pyarrow<25 pin conflicts with the core lock).
 - Label diagnostics in the report (precision/recall of each cleaner's kept set vs labels, D-008).
 - Replay-mode defect generation in sim (jitter/gripper drop) to build `bad`-tier episodes.
 - A subset-variance-aware null simulation as a slow test, once open question 1 is decided.
