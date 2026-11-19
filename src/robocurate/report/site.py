@@ -127,8 +127,55 @@ def render_site_html(a: dict[str, Any]) -> str:
     return "".join(P)
 
 
-def write_site(a: dict[str, Any], out_dir: str | Path) -> Path:
+# Hugging Face Spaces front-matter keys (huggingface/hub-docs@37ae8ca8, docs/hub/spaces-config-reference.md).
+SPACE_KEYS = {"title", "emoji", "colorFrom", "colorTo", "sdk", "python_version", "sdk_version", "suggested_hardware",
+              "suggested_storage", "app_file", "app_build_command", "app_port", "base_path", "fullWidth", "header",
+              "short_description", "models", "datasets", "tags", "thumbnail", "pinned", "hf_oauth",
+              "hf_oauth_scopes", "hf_oauth_expiration_minutes", "hf_oauth_authorized_org", "disable_embedding",
+              "startup_duration_timeout", "custom_headers", "preload_from_hub"}
+SPACE_COLORS = {"red", "yellow", "green", "blue", "indigo", "purple", "pink", "gray"}
+
+
+class SiteError(ValueError):
+    pass
+
+
+def space_front_matter(out_dir: str | Path) -> dict[str, Any] | None:
+    """The YAML front matter of <out_dir>/README.md if the directory is a Space, else None."""
+    import yaml
+
+    p = Path(out_dir) / "README.md"
+    if not p.exists():
+        return None
+    text = p.read_text()
+    if not text.startswith("---\n"):
+        return None
+    return yaml.safe_load(text.split("---\n", 2)[1]) or {}
+
+
+def check_space(fm: dict[str, Any]) -> None:
+    """A static Space serving index.html, with documented keys only."""
+    bad = set(fm) - SPACE_KEYS
+    if bad:
+        raise SiteError(f"undocumented Space front-matter keys: {sorted(bad)}")
+    if fm.get("sdk") != "static":
+        raise SiteError("the leaderboard Space must be sdk: static")
+    if fm.get("app_file", "index.html") != "index.html":
+        raise SiteError("the leaderboard Space must serve index.html")
+    for k in ("colorFrom", "colorTo"):
+        if k in fm and fm[k] not in SPACE_COLORS:
+            raise SiteError(f"{k} must be one of {sorted(SPACE_COLORS)}")
+
+
+def write_site(a: dict[str, Any], out_dir: str | Path, allow_fake: bool = False) -> Path:
+    """index.html + leaderboard.json. In a Space directory (README.md with front matter) the README is kept, the
+    front matter is validated, and FAKE results are refused unless allow_fake (local preview only)."""
     out = Path(out_dir)
+    fm = space_front_matter(out)
+    if fm is not None:
+        check_space(fm)
+        if a.get("fake") and not allow_fake:
+            raise SiteError(f"{out} is a Space: refusing to write FAKE (synthetic-backend) results there")
     out.mkdir(parents=True, exist_ok=True)
     (out / "index.html").write_text(render_site_html(a))
     (out / "leaderboard.json").write_text(json.dumps(a, indent=2) + "\n")

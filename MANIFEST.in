@@ -1,0 +1,9 @@
+# sdist ships only the package (src/robocurate), README and pyproject; tests, configs, docs and scripts stay in the repo.
+prune tests
+prune examples
+prune scripts
+prune configs
+prune docs
+prune results
+prune submissions
+prune space

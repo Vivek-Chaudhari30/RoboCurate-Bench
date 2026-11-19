@@ -44,6 +44,7 @@ Start 2026-11-19T16:32Z (`caffeinate -dims -t 43200`). Env: rcb (py3.12, lerobot
 | 2026-11-19T18:48Z | 7 pre-registration | docs/preregistration.md (question, hypotheses, D-026 primary test + t-based 95% CI, design rules, references, tasks/mixtures, entrants with versions/status, outcome labels, M0 rule for n/K/R/S with MDE target 12 pp, empty deviations log); report computes ci95/mde/label per entrant (stats.outcome_label, t_ci95) | test_stats + test_cli_report 57 passed; ruff clean | done; NOT tagged (Vivek tags prereg-v1) |
 | 2026-11-19T18:48Z | 8 references | docs/references.bib (14 verified entries) + README credits; CuraEval verified (arXiv 2610.38221, CoRL 2026 workshop); DataMIL code verified; QoQ code TODO unverified | n/a (docs) | done |
 | 2026-11-19T18:50Z | 9 submission path | .github/ISSUE_TEMPLATE/cleaner_submission.yml (issue form), .github/workflows/submit.yml (PR paths submissions/** examples/**; read-only; runs scripts/ci_submit.py -> job summary), scripts/ci_submit.py, submissions/README.md, docs/submit.md sections 5-6 (flow; D-026 replaces the stale D-016 text) | tests/test_ci_submit.py 4 passed (incl. slow end-to-end: venv + pip -e template + submit -> PASS table) | done; workflow logic tested locally against examples/cleaner_template (not run on GitHub) |
+| 2026-11-19T18:52Z | 10 packaging + Space | PyPI robocurate-bench and robocurate both 404 (free); build + twine check PASSED (0.0.1; wheel = robocurate only; MANIFEST.in prunes sdist to src); space/ static Space (keys per hub-docs@37ae8ca8); report --site Space-aware, refuses FAKE | tests/test_space.py 3 passed; ruff clean | done; nothing uploaded or deployed |
 <!-- ng-log -->
 
 ## Previous status (B-003/M0-launch task, STOPPED at Step 1, B-004; superseded by D-026)
@@ -375,6 +376,29 @@ d = 4000, lambda = 0, m = 100).
   (tests `test_disabled_entrant_refused_in_grids_and_excluded_from_report`). It is not listed under CUPID's name.
 - *Next step if wanted.* (b): a toy diffusion policy (DDPM loss, the reference "square" output, Q = 1) on the
   toybed, then require the sanity pass there.
+
+## Packaging and Space prep (overnight 2, item 10) — nothing published, nothing deployed
+
+- **PyPI names** (JSON API, 2026-11-19): `https://pypi.org/pypi/robocurate-bench/json` -> 404 and
+  `https://pypi.org/pypi/robocurate/json` -> 404: **both free**. Nothing uploaded.
+- **Build** (throwaway venv in scratch: build 1.6.1, twine 7.0.0; build isolation pulled setuptools 84.2.1,
+  wheel 0.48.0): `robocurate_bench-0.0.1-py3-none-any.whl` and `robocurate_bench-0.0.1.tar.gz`, version 0.0.1;
+  `twine check`: **PASSED** for both.
+  - Wheel: only `robocurate/` + dist-info (57 package files).
+  - sdist: originally also shipped `tests/` (a setuptools default); a new `MANIFEST.in` prunes tests, examples,
+    scripts, configs, docs, results, submissions and space, so it now contains src/robocurate, README,
+    pyproject, setup.cfg, PKG-INFO and MANIFEST.in.
+  - Warnings (not changed, decision for Vivek): `project.license` as a TOML table is deprecated (setuptools wants
+    an SPDX string, setuptools >= 77; deadline 2027-02-18); there is no LICENSE file in the repo.
+- **Space** (`space/`): a static Space. Front-matter keys were checked against the Spaces configuration reference,
+  read from GitHub (huggingface/hub-docs@37ae8ca8 `docs/hub/spaces-config-reference.md`,
+  `docs/hub/spaces-sdks-static.md`) because huggingface.co itself failed TLS from this network.
+  - Keys used: title, emoji, colorFrom/colorTo (documented colour list), sdk: static, app_file: index.html,
+    pinned, short_description, tags. `license` is not in that reference, so it was left out.
+  - `space/index.html` is a placeholder ("No results yet").
+- **`robocurate report --site space/`**: recognizes a Space (README front matter), validates the keys, keeps the
+  README, writes index.html + leaderboard.json, and refuses FAKE results (`--allow-fake-site` = local preview only).
+- Tests: `tests/test_space.py`, 3 passed.
 
 ## References (overnight 2, item 8)
 

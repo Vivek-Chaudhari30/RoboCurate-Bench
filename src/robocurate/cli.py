@@ -141,7 +141,7 @@ def cmd_report(args) -> int:
     if args.site:
         from robocurate.report.site import write_site
 
-        print(f"site: {write_site(a, args.site)}")
+        print(f"site: {write_site(a, args.site, allow_fake=args.allow_fake_site)}")
     if a["fake"]:
         print("*** FAKE RESULTS (synthetic backend) ***")
     from robocurate.report.report import _panels
@@ -285,6 +285,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--out", help="output dir (default: results_dir)")
     p.add_argument("--n-boot", type=int, default=10_000)
     p.add_argument("--site", help="also write a static leaderboard (index.html + leaderboard.json) here")
+    p.add_argument("--allow-fake-site", action="store_true",
+                   help="allow FAKE results in a Space directory (local preview only)")
     p.set_defaults(fn=cmd_report)
 
     p = sub.add_parser("reproduce", help="resolve a leaderboard cell; print its exact commands; rerun (fake)")
