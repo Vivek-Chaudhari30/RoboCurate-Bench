@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "rcb-template-cleaner"
+version = "0.1.0"
+description = "Template RoboCurate-Bench cleaner (selection track): keep the smoothest episodes."
+requires-python = ">=3.12"
+dependencies = ["numpy"]  # robocurate-bench itself is provided by the benchmark environment
+
+# The benchmark discovers cleaners through this entry-point group. The key must equal the cleaner's `name`.
+[project.entry-points."robocurate.cleaners"]
+template_smoothness = "rcb_template_cleaner.cleaner:SmoothestEpisodes"
+
+[tool.setuptools.packages.find]
+where = ["src"]
