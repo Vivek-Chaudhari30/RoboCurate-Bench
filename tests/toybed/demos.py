@@ -22,7 +22,7 @@ def rollout_demo(seed: int, defect: str = "clean", max_steps: int = 60):
     obs, _ = env.reset(seed=seed)
     r = np.random.default_rng(seed + 7919)
     start = obs[:2].copy()
-    pause_at, pause_k = int(r.integers(5, 15)), int(r.integers(10, 20))
+    pause_at, pause_k = int(r.integers(2, 5)), int(r.integers(10, 20))
     states, actions = [], []
     t, held = 0, 0
     while True:
