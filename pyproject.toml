@@ -1,0 +1,48 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "robocurate-bench"
+version = "0.0.1"
+description = "Placebo-controlled benchmark for robot-data cleaners (episode filters) in simulation."
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+license = { text = "Apache-2.0" }
+dependencies = [
+    # Exact pin (D-001). Extras: aloha = ALOHA sim env (gym-aloha); training/evaluation
+    # are needed for `lerobot-train --help` / `lerobot-eval --help` (flag-existence test).
+    "lerobot[aloha,training,evaluation]==0.6.1",
+    "pyyaml==6.0.3",
+    "matplotlib==3.11.2",
+    "scipy==1.18.1",
+]
+
+[project.optional-dependencies]
+dev = ["pytest==9.2.0", "ruff==0.17.5"]
+
+[project.scripts]
+robocurate = "robocurate.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+robocurate = ["py.typed"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra --strict-markers"
+markers = [
+    "gpu: needs a GPU (never run in CPU-only tasks)",
+    "slow: takes more than a few seconds",
+    "integration: CPU, may use the network (HF Hub) and LeRobot datasets",
+]
+
+[tool.ruff]
+line-length = 110
+target-version = "py312"
+extend-exclude = ["tests/fixtures/broken_cleaners"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "SIM"]

@@ -1,0 +1,20 @@
+# local env (machine-specific paths)
+scripts/env.sh
+# scratch / large artifacts (should live under $ROBOCURATE_SCRATCH, ignored defensively)
+scratch/
+robocurate-scratch/
+outputs/
+checkpoints/
+wandb/
+*.safetensors
+*.mp4
+# caches
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+build/
+dist/
+.venv/
+.DS_Store
