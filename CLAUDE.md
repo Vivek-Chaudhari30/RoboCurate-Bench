@@ -29,6 +29,7 @@ RoboCurate-Bench tests whether robot-data "cleaners" (episode filters) improve i
 - No new or upgraded dependencies unless the task allows it. If allowed: pin exactly and regenerate requirements.lock.
 
 ## GPU etiquette (one shared RTX A6000 on hokkaido)
+- No GPU use at all unless your task prompt explicitly allows it.
 - Before ANY GPU work, run nvidia-smi. If a process you don't own uses >2 GB or >10% utilization, do not start. Wait (poll every 10 min, within the task's limit) or exit and report.
 - Anything longer than 10 minutes runs inside tmux.
 - Kill your own idle or finished processes. Never touch other users' processes.
@@ -38,7 +39,7 @@ RoboCurate-Bench tests whether robot-data "cleaners" (episode filters) improve i
 ## Storage
 - Nothing large goes in $HOME or the repo. Datasets, checkpoints, caches, videos and logs go under $ROBOCURATE_SCRATCH.
 - Required env vars (verify LeRobot's names in source): ROBOCURATE_SCRATCH, HF_HOME=$ROBOCURATE_SCRATCH/hf, HF_LEROBOT_HOME=$ROBOCURATE_SCRATCH/lerobot, MUJOCO_GL=egl.
-- Code must refuse to run if ROBOCURATE_SCRATCH is unset or inside $HOME.
+- Code must refuse to run if ROBOCURATE_SCRATCH is unset or inside the repo. On hokkaido it must be on the scratch disk, not under $HOME. On a Mac any directory outside the repo is fine (default ~/robocurate-scratch).
 - Small results JSONs are committed under results/. Checkpoints never are.
 
 ## Git and logging
