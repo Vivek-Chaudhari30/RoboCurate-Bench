@@ -38,11 +38,11 @@ def cmd_plan(args) -> int:
 
 def _result_mode_guard(plan) -> None:
     from robocurate.config import check_result_subsets
-    from robocurate.runs.planner import check_result_placebo_seeds
+    from robocurate.runs.planner import check_result_design
 
-    check_result_subsets(plan.grid)  # D-019: K >= 8
+    check_result_subsets(plan.grid)  # D-019/D-026: K >= 8
     if not is_tbd(plan.train_seeds):  # TBD seeds are refused below
-        check_result_placebo_seeds(plan)  # D-024: n_p >= 2
+        check_result_design(plan)  # D-026: balanced n_c = n_p = n >= 3, K >= 8 permutations
     if not _repo_path(FROZEN_MARKER).exists():
         raise ConfigError(f"result mode refused: {FROZEN_MARKER} does not exist (eval code not frozen)")
     missing = tbd_fields(plan.protocol) + [f"task.{f}" for f in tbd_fields(plan.task)]
@@ -151,7 +151,7 @@ def cmd_report(args) -> int:
             print(f"  {c['condition']:<28} runs={c['n_runs']:<3} mean={c['mean']:.3f}  cell {c['cell_id']}")
         for c in b["cleaner_vs_placebo"]:
             w = c.get("welch_secondary") or {}
-            print(f"  {c['name']} vs placebo [D-019]: diff={c['diff']:+.3f} SE={c['se']:.3f} df={c['df']:.0f} "
+            print(f"  {c['name']} vs placebo [D-026]: diff={c['diff']:+.3f} SE={c['se']:.3f} df={c['df']:.0f} "
                   f"p_holm={c['p_holm']:.3g} {'SIGNIFICANT' if c['significant'] else 'not significant'}"
                   f"   (Welch secondary p_holm={w.get('p_holm', float('nan')):.3g})")
         for c in b["reference_vs_placebo"]:

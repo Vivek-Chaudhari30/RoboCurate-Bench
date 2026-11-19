@@ -19,11 +19,11 @@ from typing import Any, Literal
 
 import yaml
 
-SEED_FLOOR = 6  # D-015 (Welch + Holm needs >= 6 runs per condition to hold the null FWER)
+SEED_FLOOR = 3  # D-026: n >= 3 seeds per condition (protocol floor; D-015's 6-seed floor is retired)
+PRIMARY_TEST = "d026_balanced"  # D-026 exact balanced prediction t-test
 
 MIN_WEIGHT_PERMUTATIONS = 8  # D-020
 RESULT_MIN_SUBSETS = 8  # D-019: result-mode runs need K >= 8 random subsets per budget
-RESULT_MIN_PLACEBO_SEEDS = 2  # D-024: result-mode runs need n_p >= 2 seeds per placebo subset / permutation
 CALIBRATION_SEED_SPAN = 100_000  # calibration_seed_start .. +SPAN is reserved for calibration evals (D-017)
 
 Mode = Literal["result", "calibration", "fake", "plan"]
@@ -209,7 +209,7 @@ class ProtocolConfig(_Guarded):
             if nts is TBD or len(ts) != nts:
                 raise ConfigError("train_seeds length must equal n_train_seeds")
             if nts < SEED_FLOOR:
-                raise ConfigError(f"n_train_seeds floor is {SEED_FLOOR} (D-015)")
+                raise ConfigError(f"n_train_seeds floor is {SEED_FLOOR} (D-026)")
         if not 0 <= g("max_curation_rollouts") <= 100:
             raise ConfigError("max_curation_rollouts must be in [0, 100] (D-007, D-022)")
         wps = g("weight_permutation_seeds")
@@ -218,8 +218,8 @@ class ProtocolConfig(_Guarded):
         salt = g("tie_break_salt")
         if salt is not None and (not isinstance(salt, str) or len(salt) < 16):
             raise ConfigError("tie_break_salt must be a fixed hex string of >= 16 chars (D-021)")
-        if g("test") != "welch_holm":
-            raise ConfigError("test must be 'welch_holm' (D-002)")
+        if g("test") != PRIMARY_TEST:
+            raise ConfigError(f"test must be '{PRIMARY_TEST}' (D-026)")
 
     def eval_seed_range(self, batch_size: int | None = None) -> tuple[int, int]:
         """Half-open range of env seeds lerobot-eval can touch (see eval/lerobot_eval.py docstring).

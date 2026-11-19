@@ -1,9 +1,13 @@
-"""Statistics for RoboCurate-Bench (D-002 as amended by D-016 and D-019).
+"""Statistics for RoboCurate-Bench (D-002 as amended by D-016, D-019 and D-026).
 
 Unit of analysis = training run. Each run contributes ONE number: its success rate over the eval
 rollouts of its final checkpoint. Rollouts are never pooled across runs as independent samples.
 
-Primary test (D-016): a deterministic cleaner yields ONE subset, so its mean carries irreducible
+PRIMARY test (D-026, at the end of this module): exact balanced prediction t-test, n_c = n_p = n >= 3,
+K >= 8, t = (mean_c - mean_p) / sqrt((1 + 1/K) var(subset means)), df = K - 1, Holm across entrants.
+
+Secondary diagnostic since D-026 (formerly primary, D-016): a deterministic
+cleaner yields ONE subset, so its mean carries irreducible
 subset-to-subset variance. Statistic t = (mean_c - mean_p) / SE with
 
     SE^2 = s_sub^2 (1 + 1/K) + s_seed^2 (1/n_c + 1/(K n_p))
@@ -482,6 +486,8 @@ class SubsetComparison:
     test: str = "d016"
     boot_ci: tuple[float, float] | None = None
     welch_secondary: dict = field(default_factory=dict)
+    balanced: bool | None = None  # D-026: entrant and every placebo subset have the same run count
+    vc_secondary: dict = field(default_factory=dict)  # D-016/D-019 test, diagnostic only (D-026)
 
 
 def compare_cleaners_d016(
@@ -517,5 +523,130 @@ def compare_cleaners_d016(
             boot_ci=bootstrap_diff_ci(cr, pl_flat, n_boot=n_boot, rng=rng),
             welch_secondary={} if w is None else {"t": w.t, "df": w.df, "p_raw": w.p_raw, "p_holm": w.p_holm,
                                                   "significant": w.significant},
+        ))
+    return out, vc
+
+
+# ---------------------------------------------------------------------------- D-026 exact balanced test
+#
+# Balanced design: every entrant and every placebo subset (or weight permutation) has n runs, K >= 8 subsets.
+# Under H0 the entrant's subset is exchangeable with a random subset, so its run mean is one more draw from
+# the distribution of subset means. The prediction t-test is exact (normal subset means):
+#     t = (mean_c - mean_p) / sqrt((1 + 1/K) * MS_between / n),  MS_between = n * var(subset means, ddof=1)
+# i.e. SE^2 = (1 + 1/K) * var(subset means), df = K - 1. With R mixture replicates (stratified: one entrant
+# subset and K placebo subsets per replicate) the differences are averaged over replicates and the subset-mean
+# variance is pooled within replicates: SE^2 = (1 + 1/K) * s2_pooled / R, df = R (K - 1).
+
+
+@dataclass(frozen=True)
+class BalancedTestResult:
+    diff: float
+    se: float
+    t: float
+    df: float
+    p: float
+    balanced: bool  # False: entrant / subsets had unequal run counts (computed anyway; not result-eligible)
+
+
+def balanced_test(entrant_runs: Sequence[float], placebo_by_subset: Sequence[Sequence[float]]) -> BalancedTestResult:
+    """D-026 primary test for one entrant (or a reference selection) vs its K placebo subsets (one replicate)."""
+    c = np.asarray(entrant_runs, dtype=float)
+    subs = [np.asarray(g, dtype=float) for g in placebo_by_subset if len(g) > 0]
+    K = len(subs)
+    if K < 2 or c.size < 1:
+        raise ValueError("D-026 test needs >= 2 placebo subsets and >= 1 entrant run")
+    sizes = {c.size} | {g.size for g in subs}
+    means = np.array([g.mean() for g in subs])
+    diff = float(c.mean() - means.mean())
+    se2 = (1.0 + 1.0 / K) * float(means.var(ddof=1))
+    df = float(K - 1)
+    if se2 <= 0:
+        t = 0.0 if diff == 0 else math.copysign(math.inf, diff)
+        return BalancedTestResult(diff, 0.0, t, df, 1.0 if diff == 0 else 0.0, len(sizes) == 1)
+    se = math.sqrt(se2)
+    t = diff / se
+    return BalancedTestResult(diff, se, t, df, float(2.0 * sps.t.sf(abs(t), df)), len(sizes) == 1)
+
+
+def balanced_test_arrays(entrants: np.ndarray, placebo: np.ndarray):
+    """Vectorized D-026 test (simulation). entrants: (..., R, C, n); placebo: (..., R, K, n).
+    R = mixture replicates (use R = 1 for a single mixture). Returns (diff, t, df, p), each (..., C)."""
+    entrants = np.asarray(entrants, dtype=float)
+    placebo = np.asarray(placebo, dtype=float)
+    R, K = placebo.shape[-3], placebo.shape[-2]
+    if K < 2:
+        raise ValueError("D-026 test needs >= 2 placebo subsets")
+    sub_means = placebo.mean(-1)  # (..., R, K)
+    s2 = sub_means.var(-1, ddof=1).mean(-1)  # pooled within replicates (equal K): (...)
+    diff = (entrants.mean(-1) - sub_means.mean(-1)[..., None]).mean(-2)  # (..., C)
+    se2 = (1.0 + 1.0 / K) * s2 / R
+    df = float(R * (K - 1))
+    with np.errstate(divide="ignore", invalid="ignore"):
+        t = diff / np.sqrt(se2)[..., None]
+        p = 2.0 * sps.t.sf(np.abs(t), df)
+    p = np.where((se2 <= 0)[..., None], np.where(diff == 0, 1.0, 0.0), p)
+    return diff, t, np.full(diff.shape, df), p
+
+
+def balanced_se(sigma_sub: float, sigma_run: float, n: int, K: int, R: int = 1) -> tuple[float, float]:
+    """True SE of the D-026 difference and its df. sigma_run = run-level SD (seed + eval binomial noise;
+    use run_level_sigma). Subset-mean variance tau^2 = sigma_sub^2 + sigma_run^2 / n."""
+    tau2 = sigma_sub**2 + sigma_run**2 / n
+    return math.sqrt((1.0 + 1.0 / K) * tau2 / R), float(R * (K - 1))
+
+
+def balanced_power(effect: float, sigma_sub: float, sigma_run: float, n: int, K: int, R: int = 1,
+                   alpha: float = 0.05, n_comparisons: int = 7) -> float:
+    """Power of the D-026 test: under the alternative t ~ noncentral t(R(K-1), effect / SE) exactly (normal
+    model). Bonferroni alpha/m = Holm's strictest step (conservative for Holm)."""
+    se, df = balanced_se(sigma_sub, sigma_run, n, K, R)
+    if se == 0:
+        return 1.0 if effect != 0 else alpha / n_comparisons
+    crit = sps.t.ppf(1 - alpha / n_comparisons / 2, df)
+    return _two_sided_nct_power(crit, df, effect / se)
+
+
+def balanced_mde(sigma_sub: float, sigma_run: float, n: int, K: int, R: int = 1, alpha: float = 0.05,
+                 power: float = 0.80, n_comparisons: int = 7) -> float:
+    """Smallest effect with the requested power under the D-026 test."""
+    from scipy.optimize import brentq
+
+    se, _ = balanced_se(sigma_sub, sigma_run, n, K, R)
+    if se == 0:
+        return 0.0
+    f = lambda e: balanced_power(e, sigma_sub, sigma_run, n, K, R, alpha, n_comparisons) - power  # noqa: E731
+    hi = se
+    while f(hi) < 0:
+        hi *= 2
+    return float(brentq(f, 0.0, hi, xtol=1e-6))
+
+
+def compare_entrants_d026(
+    entrant_runs: Mapping[str, Sequence[float]],
+    placebo_by_subset: Sequence[Sequence[float]],
+    other_groups: Sequence[Sequence[float]] = (),
+    alpha: float = 0.05,
+    n_boot: int = 10_000,
+    seed: int = 0,
+) -> tuple[list[SubsetComparison], VarianceComponents]:
+    """PRIMARY analysis for one track x budget (D-026), Holm across `entrant_runs`.
+
+    Secondary diagnostics attached to each comparison (labeled): the D-016/D-019 variance-components test
+    (`vc_secondary`), Welch vs pooled placebo runs (`welch_secondary`), and the run-level bootstrap CI.
+    Variance components are returned as diagnostics only.
+    """
+    names = list(entrant_runs)
+    old, vc = compare_cleaners_d016(entrant_runs, placebo_by_subset, other_groups, alpha, n_boot, seed)
+    tests = [balanced_test(entrant_runs[n], placebo_by_subset) for n in names]
+    p_adj = holm_adjust([r.p for r in tests]) if names else np.array([])
+    out = []
+    for o, r, pa in zip(old, tests, p_adj, strict=True):
+        out.append(SubsetComparison(
+            name=o.name, n_cleaner_runs=o.n_cleaner_runs, n_placebo_runs=o.n_placebo_runs, n_subsets=o.n_subsets,
+            cleaner_mean=o.cleaner_mean, placebo_mean=o.placebo_mean, diff=r.diff, se=r.se, t=r.t, df=r.df,
+            p_raw=r.p, p_holm=float(pa), significant=bool(pa <= alpha), test="d026", boot_ci=o.boot_ci,
+            welch_secondary=o.welch_secondary, balanced=r.balanced,
+            vc_secondary={"se": o.se, "t": o.t, "df": o.df, "p_raw": o.p_raw, "p_holm": o.p_holm,
+                          "significant": o.significant},
         ))
     return out, vc

@@ -78,7 +78,7 @@ train_seeds: TBD
 random_subset_seeds: [2000, 2001, 2002]
 curation_seed_range: [500000, 599999]
 alpha: 0.05
-test: welch_holm
+test: d026_balanced
 """
 
 
@@ -113,9 +113,9 @@ def test_protocol_tbd_result_mode_raises(tmp_path):
         (("n_eval_rollouts: 200", "n_eval_rollouts: 50"), ">= 200"),
         (("checkpoint_rule: final", "checkpoint_rule: best"), "D-003"),
         (("random_subset_seeds: [2000, 2001, 2002]", "random_subset_seeds: [2000]"), ">= 3"),
-        (("n_train_seeds: TBD\ntrain_seeds: TBD", "n_train_seeds: 3\ntrain_seeds: [1, 2, 3]"), "floor is 6"),
+        (("n_train_seeds: TBD\ntrain_seeds: TBD", "n_train_seeds: 2\ntrain_seeds: [1, 2]"), "floor is 3"),
         (("curation_seed_range: [500000, 599999]", "curation_seed_range: [100100, 200000]"), "overlap"),
-        (("test: welch_holm", "test: binomial"), "D-002"),
+        (("test: d026_balanced", "test: welch_holm"), "D-026"),
         (("alpha: 0.05", "alpha: 0.05\ncalibration_seed_start: 100050"), "calibration seeds"),
         (("alpha: 0.05", "alpha: 0.05\ncalibration_seed_start: 450000"), "calibration seeds"),
     ],

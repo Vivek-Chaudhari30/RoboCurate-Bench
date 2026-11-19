@@ -1,7 +1,7 @@
 """`robocurate report --site out/`: a static leaderboard, ONE self-contained HTML file plus leaderboard.json.
 
 No framework, no external requests (system font stack, inline CSS and SVG). Per cell: mean success with the
-run-level 95% CI (a small inline interval bar), the difference vs placebo with the D-019 test, MDE, curation
+run-level 95% CI (a small inline interval bar), the difference vs placebo with the D-026 test, MDE, curation
 cost and the track. FAKE data is watermarked on every view (banner + diagonal watermark + title prefix).
 """
 
@@ -72,9 +72,10 @@ def render_site_html(a: dict[str, Any]) -> str:
                  "performance.</div><div class='wm' aria-hidden='true'>FAKE</div>")
     P.append(f"<main><h1>{E(title)}</h1><p class='sub'>Does cleaning robot data help? Each entrant is compared with "
              "size-matched random subsets (selection track) or with its own weights randomly permuted across "
-             "episodes (weighting track). The unit of analysis is the training run. Primary test (D-016, D-019): "
-             "t = (mean<sub>entrant</sub> − mean<sub>placebo</sub>) / SE, with subset-to-subset and seed variance "
-             "components, df = K − 1, Holm across the entrants of a track.</p>")
+             "episodes (weighting track). The unit of analysis is the training run. Primary test (D-026, exact for a "
+             "balanced design n<sub>c</sub> = n<sub>p</sub> = n ≥ 3, K ≥ 8): t = (mean<sub>entrant</sub> − "
+             "mean<sub>placebo</sub>) / √((1 + 1/K)·var(subset means)), df = K − 1, Holm across the entrants of a "
+             "track.</p>")
     P.append(f"<p class='meta'>kind: {E(a['kind'])} · α = {a['alpha']} · results: {a.get('n_results', '—')} · "
              f"git {E(str((a.get('git') or {}).get('hash', '—'))[:10])} · generated "
              f"{E(str(a.get('generated_utc', '—'))[:19])} UTC</p>")
@@ -109,12 +110,14 @@ def render_site_html(a: dict[str, Any]) -> str:
         if b["mde"]:
             m = b["mde"]
             trunc = " (truncated at 0)" if m["s_sub_truncated"] else ""
-            P.append(f"<p class='meta'>s<sub>sub</sub> = {m['s_sub']:.3f}{trunc}"
+            P.append(f"<p class='meta'>SD of placebo subset means = {m['tau']:.3f} · diagnostics: "
+                     f"s<sub>sub</sub> = {m['s_sub']:.3f}{trunc}"
                      f" · s<sub>seed</sub> = {m['s_seed']:.3f} · K = {m['K']}, n<sub>p</sub> = {m['n_p']}, "
                      f"n<sub>c</sub> = {m['n_c']}, df = {m['df']} · MDE (80% power, Bonferroni over "
                      f"{m['n_comparisons']}): <strong>{100 * m['mde']:.1f} pp</strong></p>")
     P.append("<p class='foot'>Oracle (uses hidden labels) and full data are reference conditions outside the Holm "
-             "family. Welch vs pooled placebo runs is computed as a secondary diagnostic only (leaderboard.json). "
+             "family. The D-016/D-019 variance-components test and Welch vs pooled placebo runs are secondary "
+             "diagnostics only (leaderboard.json). "
              "Reproduce any cell with <code>robocurate reproduce &lt;cell&gt;</code>.</p></main></body></html>")
     return "".join(P)
 

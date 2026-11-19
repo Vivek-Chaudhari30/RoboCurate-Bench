@@ -1,8 +1,9 @@
 """`robocurate report`: report.md + leaderboard.json + one PNG from a directory of results JSONs.
 
-Statistics (D-002 as amended by D-016 and D-019): one number per training run (its final-checkpoint success rate).
-Primary test: each cleaner's runs vs the K random-subset placebo, SE with subset-to-subset and seed variance
-components, df = K - 1, Holm across cleaners. Weighting track (D-020): each entrant vs its own permuted-weights
+Statistics (D-002 as amended by D-016, D-019 and D-026): one number per training run (its final-checkpoint success
+rate). Primary test (D-026): exact balanced prediction t-test of each entrant's runs vs the K placebo subsets,
+SE^2 = (1 + 1/K) var(subset means), df = K - 1, Holm across entrants. The D-016/D-019 variance-components test is a
+labeled secondary diagnostic. Weighting track (D-020): each entrant vs its own permuted-weights
 placebo, Holm across weighting entrants; unweighted full data is a reference. Oracle (D-012) and full data are
 reference conditions outside the Holm family. Welch vs pooled placebo runs is kept as a labeled SECONDARY
 diagnostic. Rollouts are never pooled across runs.
@@ -90,9 +91,13 @@ def _by_subset(rs) -> list[list[float]]:
 def _comparisons(entrants: dict[str, list[float]], placebo: list[list[float]],
                  refs: dict[str, tuple[list[float], bool]],
                  alpha: float, n_boot: int, track: str, costs: dict[str, Any]) -> tuple[list, list, dict | None]:
-    """D-016/D-019 primary test (Holm across `entrants`), references outside the family, MDE."""
-    others = list(entrants.values()) + [v for v, _ in refs.values()]
-    comps_raw, vc = S.compare_cleaners_d016(entrants, placebo, others[len(entrants):], alpha=alpha, n_boot=n_boot)
+    """D-026 primary test (Holm across `entrants`), references outside the family, MDE.
+
+    References: a selection reference (oracle, own subset variance) uses the D-026 test too; full data
+    (not a draw from the subset distribution) uses the variance-components SE without the own-subset term.
+    """
+    others = [v for v, _ in refs.values()]
+    comps_raw, vc = S.compare_entrants_d026(entrants, placebo, others, alpha=alpha, n_boot=n_boot)
     comps = []
     for c in comps_raw:
         d = asdict(c)
@@ -103,17 +108,22 @@ def _comparisons(entrants: dict[str, list[float]], placebo: list[list[float]],
     pm = float(np.mean([np.mean(g) for g in placebo]))
     out_refs = []
     for name, (runs, own) in refs.items():
-        t = S.subset_test(runs, vc, pm, own_subset_var=own)
+        if own:
+            t = S.balanced_test(runs, placebo)
+            test = "d026"
+        else:
+            t = S.subset_test(runs, vc, pm, own_subset_var=False)
+            test = "d016 variance components, no own-subset term (full data is not a subset draw)"
         out_refs.append({"condition": name, "diff": t.diff, "se": t.se, "t": t.t, "df": t.df, "p": t.p,
-                         "significant": bool(t.p <= alpha), "note": "reference condition; not in the Holm family"})
+                         "significant": bool(t.p <= alpha), "test": test,
+                         "note": "reference condition; not in the Holm family"})
     n_p = int(round(np.mean([len(g) for g in placebo])))
     n_c = max([len(v) for v in entrants.values()] or [n_p])
     m = max(1, len(entrants))
-    sw = math.sqrt(vc.s_seed2)
-    design = S.Design(n_c=max(1, n_c), K=vc.K, n_p=max(1, n_p), n_cleaners=m)
-    mde = {"s_sub": vc.s_sub, "s_seed": vc.s_seed, "s_sub_truncated": vc.truncated, "K": vc.K, "n_p": n_p,
-           "n_c": n_c, "n_comparisons": m, "power": 0.8, "df": vc.df_b,
-           "mde": S.subset_mde(vc.s_sub, sw, design, alpha, 0.8, m)}
+    tau = float(np.std([np.mean(g) for g in placebo], ddof=1))  # SD of subset means (the D-026 SE input)
+    mde = {"tau": tau, "s_sub": vc.s_sub, "s_seed": vc.s_seed, "s_sub_truncated": vc.truncated, "K": vc.K,
+           "n_p": n_p, "n_c": n_c, "n_comparisons": m, "power": 0.8, "df": vc.K - 1, "test": "d026",
+           "mde": S.balanced_mde(tau, 0.0, max(1, n_p), vc.K, 1, alpha, 0.8, m)}
     return comps, out_refs, mde
 
 
@@ -129,9 +139,10 @@ def analyze(recs: list[dict], alpha: float = 0.05, n_boot: int = 10_000) -> dict
         by_task[r["spec"]["task"]].append(r)
 
     out: dict[str, Any] = {"kind": kind, "fake": kind == "fake", "alpha": alpha, "tasks": [],
-                           "primary_test": "D-016/D-019: (mean_c - mean_p)/SE, SE^2 = s_sub^2(1+1/K) + "
-                                           "s_seed^2(1/n_c + 1/(K n_p)), df = K-1, Holm across entrants",
-                           "secondary": "Welch vs pooled placebo runs (D-002, diagnostic only)"}
+                           "primary_test": "D-026: t = (mean_c - mean_p) / sqrt((1 + 1/K) var(subset means)), "
+                                           "df = K-1, balanced n_c = n_p = n >= 3, K >= 8, Holm across entrants",
+                           "secondary": "D-016/D-019 variance-components test and Welch vs pooled placebo runs "
+                                        "(diagnostics only)"}
     for task, trs in sorted(by_task.items()):
         kind_of = lambda r: r["spec"]["condition"]["kind"]  # noqa: E731
         full = [r for r in trs if kind_of(r) == "full"]
@@ -151,7 +162,7 @@ def analyze(recs: list[dict], alpha: float = 0.05, n_boot: int = 10_000) -> dict
             if not full:
                 issues.append("no full-data runs (rule 1)")
             if kind == "result" and n_subsets < 8:
-                issues.append(f"K = {n_subsets} < 8 random subsets: not result-grade (D-019)")
+                issues.append(f"K = {n_subsets} < 8 random subsets: not result-grade (D-019, D-026)")
             order = ["full", "random", "oracle"]
             conditions = [_cond_summary(task, b, k, groups[k]) for k in
                           sorted(groups, key=lambda s: (order.index(s) if s in order else 3, s))]
@@ -224,11 +235,12 @@ def render_markdown(a: dict[str, Any], plot_name: str | None, n_files: int) -> s
         L += [FAKE_BANNER, "", "**These numbers come from the fake backend with injected effect sizes. They "
               "verify the pipeline; they say nothing about any cleaner.**", ""]
     L += [f"# RoboCurate-Bench report ({a['kind']})", "",
-          f"Results files: {n_files}. Unit of analysis: training run (D-002). Primary test (D-016, D-019): each "
-          "entrant vs its placebo (K random subsets, or K weight permutations for the weighting track, D-020); "
-          "SE from subset-to-subset and seed variance components; df = K - 1; Holm across entrants of a track; "
-          f"alpha = {a['alpha']}. Oracle and full data are references outside the Holm family. Welch vs pooled "
-          "placebo runs is a SECONDARY diagnostic only.", ""]
+          f"Results files: {n_files}. Unit of analysis: training run (D-002). Primary test (D-026): each "
+          "entrant vs its placebo (K random subsets, or K weight permutations for the weighting track, D-020), "
+          "exact balanced prediction t-test, SE^2 = (1 + 1/K) var(subset means), df = K - 1, valid for n_c = n_p "
+          f"= n >= 3 and K >= 8; Holm across entrants of a track; alpha = {a['alpha']}. Oracle and full data are "
+          "references outside the Holm family. The D-016/D-019 variance-components test and Welch vs pooled "
+          "placebo runs are SECONDARY diagnostics only.", ""]
     for task, title, b in _panels(a):
         L += [f"## {task} - {title}", ""]
         L += [f"- ⚠️ {i}" for i in b["issues"]]
@@ -240,14 +252,16 @@ def render_markdown(a: dict[str, Any], plot_name: str | None, n_files: int) -> s
                      f"[{_fmt(lo)}, {_fmt(hi)}] | {_fmt(c['curation_gpu_h'], 2)} |")
         L.append("")
         if b["cleaner_vs_placebo"]:
-            L += ["**Entrants vs placebo (primary, D-019; Holm across entrants)**", "",
-                  "| entrant | diff | SE | t | df | p (raw) | p (Holm) | significant | Welch p (Holm, secondary) |",
-                  "|---|---|---|---|---|---|---|---|---|"]
+            L += ["**Entrants vs placebo (primary, D-026; Holm across entrants)**", "",
+                  "| entrant | diff | SE | t | df | p (raw) | p (Holm) | significant | D-016 p (Holm, secondary) "
+                  "| Welch p (Holm, secondary) |",
+                  "|---|---|---|---|---|---|---|---|---|---|"]
             for c in b["cleaner_vs_placebo"]:
                 w = c.get("welch_secondary") or {}
+                v = c.get("vc_secondary") or {}
                 L.append(f"| {c['name']} | {c['diff']:+.3f} | {c['se']:.3f} | {c['t']:.2f} | {c['df']:.0f} | "
                          f"{c['p_raw']:.2g} | {c['p_holm']:.2g} | {'YES' if c['significant'] else 'no'} | "
-                         f"{_fmt(w.get('p_holm'), 3)} |")
+                         f"{_fmt(v.get('p_holm'), 3)} | {_fmt(w.get('p_holm'), 3)} |")
             L.append("")
         if b["reference_vs_placebo"]:
             L += ["**Reference conditions vs placebo (not entrants, unadjusted)**", "",
@@ -258,7 +272,8 @@ def render_markdown(a: dict[str, Any], plot_name: str | None, n_files: int) -> s
             L.append("")
         if b["mde"]:
             m = b["mde"]
-            L += [f"**Variance components and MDE**: s_sub = {m['s_sub']:.3f}"
+            L += [f"**MDE and variance components**: SD of placebo subset means = {m['tau']:.3f} (the D-026 SE "
+                  f"input); diagnostics s_sub = {m['s_sub']:.3f}"
                   f"{' (truncated at 0)' if m['s_sub_truncated'] else ''}, s_seed = {m['s_seed']:.3f}; design "
                   f"K = {m['K']}, n_p = {m['n_p']}, n_c = {m['n_c']}, df = {m['df']}; MDE at 80% power with "
                   f"Bonferroni over {m['n_comparisons']} entrant(s): **{m['mde']:.3f}** ({100 * m['mde']:.1f} pp).", ""]

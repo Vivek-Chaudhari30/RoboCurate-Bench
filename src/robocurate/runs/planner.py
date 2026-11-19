@@ -126,26 +126,43 @@ def build_units(grid: GridConfig, protocol: ProtocolConfig) -> list[Unit]:
 PLACEBO_KINDS = ("random", "weight_placebo")
 
 
-def placebo_seed_counts(plan: Plan) -> dict[tuple[str, float, int], int]:
-    """Training runs (seeds) per placebo unit: n_p for each random subset / weight permutation."""
-    counts: dict[tuple[str, float, int], int] = {}
+def unit_seed_counts(plan: Plan) -> dict[tuple[str, float, int | None], int]:
+    """Training runs (seeds) per unit (condition x budget x subset/permutation)."""
+    counts: dict[tuple[str, float, int | None], int] = {}
     for s in plan.specs():
-        if s.condition.kind in PLACEBO_KINDS:
-            key = (s.condition.label, s.budget, s.subset_index)
-            counts[key] = counts.get(key, 0) + 1
+        key = (s.condition.label, s.budget, s.subset_index)
+        counts[key] = counts.get(key, 0) + 1
     return counts
 
 
-def check_result_placebo_seeds(plan: Plan) -> None:
-    """D-024: result-mode runs need n_p >= 2 seeds per placebo subset (selection) and per permutation (weighting)."""
-    from robocurate.config import RESULT_MIN_PLACEBO_SEEDS
+def placebo_seed_counts(plan: Plan) -> dict[tuple[str, float, int], int]:
+    """n_p for each random subset / weight permutation."""
+    return {k: n for k, n in unit_seed_counts(plan).items() if k[0].split(":")[0] in PLACEBO_KINDS}
 
-    low = {k: n for k, n in placebo_seed_counts(plan).items() if n < RESULT_MIN_PLACEBO_SEEDS}
-    if low:
-        (label, budget, idx), n = min(low.items(), key=lambda kv: kv[1])
-        raise ConfigError(f"result mode refused: {len(low)} placebo unit(s) have fewer than "
-                          f"{RESULT_MIN_PLACEBO_SEEDS} seeds (e.g. {label} budget {budget} subset {idx}: n_p = {n}); "
-                          f"D-024 requires n_p >= {RESULT_MIN_PLACEBO_SEEDS}")
+
+def check_result_design(plan: Plan) -> None:
+    """D-026: result-mode runs need a balanced design: every condition unit (entrants, references, each placebo
+    subset / weight permutation) has the same n seeds, n >= 3 (n_c = n_p = n), and K >= 8 placebo units per
+    track (K for selection is checked on the grid by `check_result_subsets`; permutations here)."""
+    from robocurate.config import RESULT_MIN_SUBSETS, SEED_FLOOR
+
+    counts = unit_seed_counts(plan)
+    ns = sorted(set(counts.values()))
+    if len(ns) > 1:
+        lo = min(counts.items(), key=lambda kv: kv[1])
+        hi = max(counts.items(), key=lambda kv: kv[1])
+        raise ConfigError(f"result mode refused: unbalanced design (seeds per unit range {ns[0]}..{ns[-1]}, e.g. "
+                          f"{lo[0][0]}: {lo[1]} vs {hi[0][0]}: {hi[1]}); D-026 requires n_c = n_p = n")
+    if ns and ns[0] < SEED_FLOOR:
+        raise ConfigError(f"result mode refused: n = {ns[0]} seeds per condition; D-026 requires n >= {SEED_FLOOR}")
+    perms: dict[str, set] = {}
+    for (label, _b, idx) in counts:
+        if label.startswith("weight_placebo"):
+            perms.setdefault(label, set()).add(idx)
+    for label, idx in perms.items():
+        if len(idx) < RESULT_MIN_SUBSETS:
+            raise ConfigError(f"result mode refused: {label} has K = {len(idx)} weight permutations; D-026 requires "
+                              f"K >= {RESULT_MIN_SUBSETS}")
 
 
 def make_plan(

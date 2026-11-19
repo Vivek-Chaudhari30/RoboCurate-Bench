@@ -13,7 +13,7 @@ train_seeds: TBD
 random_subset_seeds: [2000, 2001, 2002]
 curation_seed_range: [500000, 599999]
 alpha: 0.05
-test: welch_holm
+test: d026_balanced
 """
 
 TASK = """

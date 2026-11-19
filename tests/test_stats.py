@@ -162,16 +162,17 @@ def null_grid_fwer(n_sims=1000, n_cleaners=7, n_seeds=3, n_subsets=3, sigma_seed
     return rej.any(axis=-1).mean()
 
 
+WELCH_SEEDS = 6  # D-015's historical floor for Welch (secondary diagnostic since D-016; floor retired by D-026)
+
+
 def test_null_fwer_calibration():
-    """Task-spec null calibration at the protocol seed floor (D-015: 6 seeds).
+    """Welch (secondary diagnostic) null calibration at D-015's historical 6 seeds.
 
     20000 grids instead of 1000: at a true FWER of ~0.06, 1000 grids have MC sd ~0.0075, too coarse to
     test a 0.07 bound reliably. More grids make the test stricter, not weaker.
     """
-    from robocurate.config import SEED_FLOOR
-
     t0 = time.time()
-    fwer = null_grid_fwer(n_sims=20000, n_seeds=SEED_FLOOR)
+    fwer = null_grid_fwer(n_sims=20000, n_seeds=WELCH_SEEDS)
     assert fwer <= 0.07, f"Holm family-wise false-positive rate {fwer:.4f} > 0.07"
     assert time.time() - t0 < 60
 
@@ -185,9 +186,7 @@ def test_three_seeds_is_not_enough():
 @pytest.mark.parametrize("base", [0.2, 0.5, 0.8])
 @pytest.mark.parametrize("seed", [1, 2])
 def test_null_fwer_calibration_robust(base, seed):
-    from robocurate.config import SEED_FLOOR
-
-    assert null_grid_fwer(n_sims=20000, n_seeds=SEED_FLOOR, base=base, seed=seed) <= 0.07
+    assert null_grid_fwer(n_sims=20000, n_seeds=WELCH_SEEDS, base=base, seed=seed) <= 0.07
 
 
 def power_detect_rate(effect=0.20, sigma_seed=0.05, n_seeds=5, n_subsets=3, n_cleaners=7, n_sims=1000,
@@ -210,9 +209,7 @@ def test_power_20pp_5_seeds():
 
 
 def test_power_20pp_at_seed_floor():
-    from robocurate.config import SEED_FLOOR
-
-    assert power_detect_rate(n_seeds=SEED_FLOOR) >= 0.70
+    assert power_detect_rate(n_seeds=WELCH_SEEDS) >= 0.70
 
 
 def test_mde_zero_sigma_regression():
@@ -299,30 +296,101 @@ def test_design_runs():
 
 @pytest.mark.slow
 def test_primary_test_null_calibration():
-    """Hard null calibration of the primary test (D-016 + D-019 + D-024), 7 null cleaners, 200 rollouts.
+    """Hard null calibration of the primary test (D-026), 7 null entrants, 200 rollouts, 200 000 grids per cell.
 
-    Result-eligible cells (K >= 8, n_p >= 2; 200 000 grids each): upper 95% Monte Carlo bound <= 0.06.
-    K < 8 cells (calibration only): FWER <= 0.07. n_p = 1 cells are reported, labeled not result-eligible,
-    with no pass/fail (D-024). The table, with MC SEs, is printed (pytest -s).
+    Every result-eligible cell (balanced n in {3, 5}, K in {8, 12}, sigma_sub x sigma_seed grid): upper 95% Monte
+    Carlo bound on the Holm FWER <= 0.06. The old unbalanced designs (old test) are printed as an informational
+    table with no pass/fail. Tables with MC SEs are printed (pytest -s).
     """
     from robocurate.report.simulate import grid, markdown
 
     cells = grid(power=False)
     print("\n" + markdown(cells))
-    assert any(c.eligible for c in cells) and any(c.verdict is None for c in cells)
+    info = grid(power=False, informational=True)
+    print("\nInformational (not result-eligible):\n" + markdown(info))
+    assert len(cells) == 32 and all(c.eligible for c in cells)
+    assert all(c.verdict is None for c in info)
     fails = [c for c in cells if c.verdict == "FAIL"]
     assert not fails, f"calibration fails: {fails}"
 
 
 def test_simulate_eligibility_labels():
-    from robocurate.report.simulate import Cell, markdown
+    from robocurate.report.simulate import Cell, markdown, result_eligible
 
-    cells = [Cell(0.04, 0.06, 8, 2, 3, 200_000, 0.055), Cell(0.04, 0.06, 8, 1, 3, 200_000, 0.0711),
-             Cell(0.04, 0.06, 4, 2, 3, 40_000, 0.05), Cell(0.04, 0.06, 12, 2, 5, 200_000, 0.0595)]
-    assert [c.verdict for c in cells] == ["ok", None, "ok", "FAIL"]
+    assert result_eligible(8, 3, 3) and result_eligible(12, 5, 5)
+    assert not result_eligible(8, 2, 3) and not result_eligible(8, 2, 2) and not result_eligible(4, 3, 3)
+    cells = [Cell(0.04, 0.06, 8, 3, 3, 200_000, 0.041), Cell(0.04, 0.06, 8, 1, 3, 200_000, 0.0711, "d016"),
+             Cell(0.04, 0.06, 12, 5, 5, 200_000, 0.0595), Cell(0.04, 0.06, 8, 2, 5, 200_000, 0.03, "d016")]
+    assert [c.verdict for c in cells] == ["ok", None, "FAIL", None]
     md = markdown(cells)
-    assert "not result-eligible (n_p = 1) | 200000 | 0.0711" in md and "no pass/fail" in md
-    assert md.count("result-eligible |") == 2 and "**FAIL**" in md
+    assert "| 8, 1, 3 | d016 | not result-eligible (informational) | 200000 | 0.0711" in md and "no pass/fail" in md
+    assert md.count("| result-eligible |") == 2 and "**FAIL**" in md
+
+
+# ------------------------------------------------------------------ D-026 exact balanced test
+
+
+def test_balanced_test_by_hand():
+    placebo = [[0.5, 0.6, 0.7], [0.4, 0.5, 0.6], [0.6, 0.6, 0.6], [0.3, 0.5, 0.7]]
+    entrant = [0.8, 0.7, 0.9]
+    means = np.array([0.6, 0.5, 0.6, 0.5])
+    K, n = 4, 3
+    msb = n * means.var(ddof=1)
+    se = math.sqrt((1 + 1 / K) * msb / n)
+    r = S.balanced_test(entrant, placebo)
+    assert r.balanced and r.df == K - 1
+    assert r.diff == pytest.approx(0.8 - 0.55) and r.se == pytest.approx(se)
+    assert r.p == pytest.approx(2 * sps.t.sf(abs((0.8 - 0.55) / se), K - 1))
+    assert not S.balanced_test([0.8, 0.7], placebo).balanced  # n_c != n_p is flagged
+
+
+def test_balanced_test_arrays_match_scalar():
+    rng = np.random.default_rng(3)
+    c = rng.uniform(0.3, 0.7, (5, 7, 3))
+    p = rng.uniform(0.3, 0.7, (5, 8, 3))
+    diff, t, df, pv = S.balanced_test_arrays(c[:, None], p[:, None])
+    for g in range(5):
+        for j in range(7):
+            r = S.balanced_test(c[g, j], p[g])
+            assert pv[g, j] == pytest.approx(r.p) and t[g, j] == pytest.approx(r.t) and df[g, j] == 7
+
+
+def test_balanced_test_is_exact_under_normal_model():
+    """Under the normal model (no clipping, no binomial) the single-test rejection rate equals alpha."""
+    rng = np.random.default_rng(0)
+    G, K, n = 200_000, 8, 3
+    a_c = rng.normal(0, 0.05, (G, 1, 1, 1))
+    a_p = rng.normal(0, 0.05, (G, 1, K, 1))
+    c = a_c + rng.normal(0, 0.08, (G, 1, 1, n))
+    p = a_p + rng.normal(0, 0.08, (G, 1, K, n))
+    pv = S.balanced_test_arrays(c, p)[3][:, 0]
+    rate = (pv <= 0.05).mean()
+    assert abs(rate - 0.05) < 4 * math.sqrt(0.05 * 0.95 / G)
+
+
+def test_balanced_power_matches_simulation():
+    rng = np.random.default_rng(1)
+    G, K, n, R, eff, ss, sd = 100_000, 8, 3, 2, 0.12, 0.04, 0.06
+    c = eff + rng.normal(0, ss, (G, R, 1, 1)) + rng.normal(0, sd, (G, R, 1, n))
+    p = rng.normal(0, ss, (G, R, K, 1)) + rng.normal(0, sd, (G, R, K, n))
+    pv = S.balanced_test_arrays(c, p)[3][:, 0]
+    mc = (pv <= 0.05 / 7).mean()
+    assert S.balanced_power(eff, ss, sd, n, K, R) == pytest.approx(mc, abs=0.01)
+    mde = S.balanced_mde(ss, sd, n, K, R)
+    assert S.balanced_power(mde, ss, sd, n, K, R) == pytest.approx(0.8, abs=1e-4)
+    assert S.balanced_mde(ss, sd, n, K, 3) < mde < S.balanced_mde(ss, sd, n, K, 1)
+
+
+def test_compare_entrants_d026_primary_with_secondaries():
+    rng = np.random.default_rng(2)
+    placebo = [list(0.5 + rng.normal(0, 0.03) + rng.normal(0, 0.04, 3)) for _ in range(8)]
+    ents = {"good": list(0.75 + rng.normal(0, 0.04, 3)), "null": list(0.5 + rng.normal(0, 0.04, 3))}
+    out, vc = S.compare_entrants_d026(ents, placebo, n_boot=500)
+    by = {c.name: c for c in out}
+    assert all(c.test == "d026" and c.balanced and c.df == 7 for c in out)
+    assert by["good"].significant and not by["null"].significant
+    assert set(by["good"].vc_secondary) >= {"p_holm", "se"} and "p_holm" in by["good"].welch_secondary
+    assert by["good"].p_holm >= by["good"].p_raw and vc.K == 8
 
 
 def test_power_large_noncentrality_regression():

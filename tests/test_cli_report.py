@@ -87,40 +87,80 @@ def _k8_cfg(tmp_path, weighting=False):
     return cfg
 
 
-def test_check_result_placebo_seeds_unit(tmp_path):
-    """D-024: n_p = seeds per placebo subset (and per weight permutation) must be >= 2 in result mode."""
+def test_check_result_design_unit(tmp_path, monkeypatch):
+    """D-026: result mode needs a balanced design: n_c = n_p = n >= 3, K >= 8 (subsets and weight permutations)."""
     from robocurate.config import ConfigError
-    from robocurate.runs.planner import check_result_placebo_seeds, make_plan, placebo_seed_counts
+    from robocurate.runs.planner import Plan, check_result_design, make_plan, placebo_seed_counts
 
     grid = str(_k8_cfg(tmp_path)["grid"])
-    for seeds in ([0, 1], [0, 1, 2]):
+    for seeds in ([0, 1, 2], [0, 1, 2, 3, 4]):
         plan = make_plan(grid, train_seeds_override=seeds)
-        check_result_placebo_seeds(plan)
+        check_result_design(plan)
         assert set(placebo_seed_counts(plan).values()) == {len(seeds)} and len(placebo_seed_counts(plan)) == 8
-    with pytest.raises(ConfigError, match="D-024"):
-        check_result_placebo_seeds(make_plan(grid, train_seeds_override=[0]))
-    wgrid = str(_k8_cfg(tmp_path, weighting=True)["grid"])  # weighting track: n_p per weight permutation
-    plan = make_plan(wgrid, train_seeds_override=[0])
-    assert sum(1 for k in placebo_seed_counts(plan) if k[0].startswith("weight_placebo")) == 8
-    with pytest.raises(ConfigError, match="D-024"):
-        check_result_placebo_seeds(plan)
-    check_result_placebo_seeds(make_plan(wgrid, train_seeds_override=[0, 1]))
+    for seeds in ([0], [0, 1]):  # n < 3
+        with pytest.raises(ConfigError, match=r"D-026 requires n >= 3"):
+            check_result_design(make_plan(grid, train_seeds_override=seeds))
+
+    plan = make_plan(grid, train_seeds_override=[0, 1, 2])
+    full_specs = Plan.specs(plan)
+
+    def drop(pred):
+        out, seen = [], set()
+        for sp in full_specs:
+            if pred(sp) and sp.condition.kind not in seen:
+                seen.add(sp.condition.kind)  # drop one run of the first matching unit
+                continue
+            out.append(sp)
+        return out
+
+    # n_c != n_p: the cleaner has one run fewer than every placebo subset (and the reverse)
+    for kind in ("cleaner", "random"):
+        monkeypatch.setattr(plan, "specs", lambda k=kind: drop(lambda sp: sp.condition.kind == k))
+        with pytest.raises(ConfigError, match=r"unbalanced design.*D-026 requires n_c = n_p = n"):
+            check_result_design(plan)
+
+    # weighting track: n per permutation, and K >= 8 permutations
+    wgrid = str(_k8_cfg(tmp_path, weighting=True)["grid"])
+    wplan = make_plan(wgrid, train_seeds_override=[0, 1, 2])
+    check_result_design(wplan)
+    assert sum(1 for k in placebo_seed_counts(wplan) if k[0].startswith("weight_placebo")) == 8
+    with pytest.raises(ConfigError, match="D-026 requires n >= 3"):
+        check_result_design(make_plan(wgrid, train_seeds_override=[0, 1]))
+    wspecs = Plan.specs(wplan)
+    monkeypatch.setattr(wplan, "specs", lambda: [sp for sp in wspecs if not (
+        sp.condition.kind == "weight_placebo" and sp.subset_index == 7)])
+    with pytest.raises(ConfigError, match=r"K = 7 weight permutations; D-026 requires K >= 8"):
+        check_result_design(wplan)
 
 
-def test_result_mode_guard_refuses_np_below_2(tmp_path):
-    """D-024 is wired into the result-mode guard, after the K check and before the FROZEN / TBD checks.
-
-    (A protocol cannot currently declare < 6 train seeds: the loader keeps the D-015 floor, so the guard is
-    exercised on a plan whose seeds are overridden.)"""
+def test_result_mode_guard_d026(tmp_path):
+    """D-026 is wired into the result-mode guard after the K check and before the FROZEN / TBD checks."""
     from robocurate.config import ConfigError
     from robocurate.runs.planner import make_plan
 
     grid = str(_k8_cfg(tmp_path)["grid"])
-    with pytest.raises(ConfigError, match=r"D-024.*|n_p = 1"):
-        cli._result_mode_guard(make_plan(grid, train_seeds_override=[0]))
-    with pytest.raises(ConfigError) as e:  # n_p = 2 passes D-024, then hits FROZEN / TBD
+    with pytest.raises(ConfigError, match="D-026"):
         cli._result_mode_guard(make_plan(grid, train_seeds_override=[0, 1]))
-    assert "D-024" not in str(e.value) and ("FROZEN" in str(e.value) or "TBD" in str(e.value))
+    with pytest.raises(ConfigError) as e:  # balanced n = 3 passes D-026, then hits FROZEN / TBD
+        cli._result_mode_guard(make_plan(grid, train_seeds_override=[0, 1, 2]))
+    assert "D-026" not in str(e.value) and ("FROZEN" in str(e.value) or "TBD" in str(e.value))
+
+
+def test_protocol_seed_floor_is_3(tmp_path):
+    """D-026 retires D-015's 6-seed floor: a protocol with 3 seeds loads, 2 is refused."""
+    from helpers import PROTOCOL
+
+    from robocurate.config import ConfigError, load_protocol
+
+    def proto(seeds):
+        f = tmp_path / f"p{len(seeds)}.yaml"
+        f.write_text(PROTOCOL.replace("n_train_seeds: TBD", f"n_train_seeds: {len(seeds)}")
+                     .replace("\ntrain_seeds: TBD", f"\ntrain_seeds: {seeds}"))
+        return f
+
+    assert load_protocol(proto([1, 2, 3])).train_seeds == [1, 2, 3]
+    with pytest.raises(ConfigError, match="floor is 3"):
+        load_protocol(proto([1, 2]))
 
 
 def test_local_backend_refuses_on_cpu(scratch_env, monkeypatch, capsys):

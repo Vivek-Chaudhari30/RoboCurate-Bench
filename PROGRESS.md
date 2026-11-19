@@ -1,6 +1,10 @@
 # PROGRESS
 
-## Status 2026-11-19 ~14:00 UTC — B-003/M0-launch task STOPPED at Step 1 (B-004)
+## Status 2026-11-19 (D-026 task, branch m1-core)
+
+In progress (see the sections below; the final summary is written at the end of the task).
+
+## Previous status (B-003/M0-launch task, STOPPED at Step 1, B-004; superseded by D-026)
 
 Branch `m1-core`. D-024 is recorded and implemented (result mode refuses n_p < 2). The hard FPR test, run on the
 result-eligible designs of the M0 power table (K in {8, 12}, n_p = 2, n_c in {3, 5}), **fails 6 eligible cells, all
@@ -112,11 +116,192 @@ launched: the previous task stopped at B-003. There is no M0 log path. The GPU w
 
 **Next step:** decide B-003. Then launch M0 (Part 2–4 of the M0 task) when hokkaido's GPU is free.
 
-**Current milestone: M0 — BLOCKED at D-024 calibration (B-004: n_c = 5, n_p = 2 cells miss the 0.06 bound); no scratch dir on hokkaido; GPU busy; GPU work not started**
+**Current milestone: M0 — test calibrated (D-026, all 32 eligible cells pass); BLOCKED on the hokkaido scratch path (B-006); GPU busy; GPU work not started**
+
+## D-026 calibration and fake end-to-end (Step 1 of the D-026 task)
+
+Primary test (D-026): t = (mean_c − mean_p) / sqrt((1 + 1/K) · var(subset means)), df = K − 1, balanced
+n_c = n_p = n >= 3, K >= 8, Holm across the entrants of a track (`stats.balanced_test`, `balanced_test_arrays`,
+`compare_entrants_d026`; power/MDE `balanced_power`, `balanced_mde`: exact noncentral t with
+nc = effect / sqrt((1 + 1/K)(sigma_sub^2 + sigma_run^2/n)/R), df = R(K − 1), Bonferroni alpha/m). The D-016/D-019
+variance-components test and Welch are attached to every comparison as labeled secondary diagnostics.
+Result mode refuses: K < 8 random subsets (`check_result_subsets`), and in `check_result_design` any unbalanced
+design (seeds per unit differ), n < 3, or < 8 weight permutations. Protocol loader floor: 3 seeds (D-015's 6
+retired); `protocol.test` must be `d026_balanced`.
+
+Null calibration: 7 null entrants, 200 rollouts, base 0.5, 200 000 grids per cell (`python scripts/null_grid.py`,
+57 s; hard slow test `test_primary_test_null_calibration`). All 32 result-eligible cells pass (max upper 95% bound
+0.0451; FWER 0.039–0.044 in every cell, as expected for an exact test with Holm over 7 correlated tests). MC power (Holm) and
+analytic power (Bonferroni, conservative) agree to <= 0.010. The unit test `test_balanced_test_is_exact_under_normal_model` checks the single
+test's size is 0.05 within 4 MC SE (200 000 grids, no clipping or binomial).
+
+Result-eligible (D-026 test):
+
+| sigma_sub | sigma_seed | K, n_p, n_c | test | eligibility | grids | FWER | MC SE | upper 95% | criterion | power 15pp (MC) | power 15pp (analytic) |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| 0.00 | 0.03 | 8, 3, 3 | d026 | result-eligible | 200000 | 0.0401 | 0.0004 | 0.0410 | upper95 <= 0.06 ok | 0.884 | 0.880 |
+| 0.00 | 0.03 | 8, 5, 5 | d026 | result-eligible | 200000 | 0.0397 | 0.0004 | 0.0406 | upper95 <= 0.06 ok | 0.987 | 0.987 |
+| 0.00 | 0.03 | 12, 3, 3 | d026 | result-eligible | 200000 | 0.0432 | 0.0005 | 0.0440 | upper95 <= 0.06 ok | 0.965 | 0.961 |
+| 0.00 | 0.03 | 12, 5, 5 | d026 | result-eligible | 200000 | 0.0428 | 0.0005 | 0.0437 | upper95 <= 0.06 ok | 0.999 | 0.999 |
+| 0.00 | 0.06 | 8, 3, 3 | d026 | result-eligible | 200000 | 0.0398 | 0.0004 | 0.0406 | upper95 <= 0.06 ok | 0.483 | 0.477 |
+| 0.00 | 0.06 | 8, 5, 5 | d026 | result-eligible | 200000 | 0.0391 | 0.0004 | 0.0399 | upper95 <= 0.06 ok | 0.747 | 0.747 |
+| 0.00 | 0.06 | 12, 3, 3 | d026 | result-eligible | 200000 | 0.0424 | 0.0005 | 0.0433 | upper95 <= 0.06 ok | 0.624 | 0.620 |
+| 0.00 | 0.06 | 12, 5, 5 | d026 | result-eligible | 200000 | 0.0430 | 0.0005 | 0.0439 | upper95 <= 0.06 ok | 0.876 | 0.876 |
+| 0.02 | 0.03 | 8, 3, 3 | d026 | result-eligible | 200000 | 0.0394 | 0.0004 | 0.0403 | upper95 <= 0.06 ok | 0.683 | 0.673 |
+| 0.02 | 0.03 | 8, 5, 5 | d026 | result-eligible | 200000 | 0.0402 | 0.0004 | 0.0410 | upper95 <= 0.06 ok | 0.825 | 0.821 |
+| 0.02 | 0.03 | 12, 3, 3 | d026 | result-eligible | 200000 | 0.0429 | 0.0005 | 0.0438 | upper95 <= 0.06 ok | 0.819 | 0.815 |
+| 0.02 | 0.03 | 12, 5, 5 | d026 | result-eligible | 200000 | 0.0436 | 0.0005 | 0.0445 | upper95 <= 0.06 ok | 0.929 | 0.927 |
+| 0.02 | 0.06 | 8, 3, 3 | d026 | result-eligible | 200000 | 0.0401 | 0.0004 | 0.0409 | upper95 <= 0.06 ok | 0.382 | 0.374 |
+| 0.02 | 0.06 | 8, 5, 5 | d026 | result-eligible | 200000 | 0.0399 | 0.0004 | 0.0408 | upper95 <= 0.06 ok | 0.569 | 0.563 |
+| 0.02 | 0.06 | 12, 3, 3 | d026 | result-eligible | 200000 | 0.0431 | 0.0005 | 0.0440 | upper95 <= 0.06 ok | 0.501 | 0.499 |
+| 0.02 | 0.06 | 12, 5, 5 | d026 | result-eligible | 200000 | 0.0441 | 0.0005 | 0.0450 | upper95 <= 0.06 ok | 0.717 | 0.711 |
+| 0.04 | 0.03 | 8, 3, 3 | d026 | result-eligible | 200000 | 0.0400 | 0.0004 | 0.0408 | upper95 <= 0.06 ok | 0.319 | 0.318 |
+| 0.04 | 0.03 | 8, 5, 5 | d026 | result-eligible | 200000 | 0.0393 | 0.0004 | 0.0402 | upper95 <= 0.06 ok | 0.374 | 0.371 |
+| 0.04 | 0.03 | 12, 3, 3 | d026 | result-eligible | 200000 | 0.0434 | 0.0005 | 0.0443 | upper95 <= 0.06 ok | 0.437 | 0.429 |
+| 0.04 | 0.03 | 12, 5, 5 | d026 | result-eligible | 200000 | 0.0426 | 0.0005 | 0.0434 | upper95 <= 0.06 ok | 0.497 | 0.495 |
+| 0.04 | 0.06 | 8, 3, 3 | d026 | result-eligible | 200000 | 0.0396 | 0.0004 | 0.0405 | upper95 <= 0.06 ok | 0.216 | 0.213 |
+| 0.04 | 0.06 | 8, 5, 5 | d026 | result-eligible | 200000 | 0.0396 | 0.0004 | 0.0404 | upper95 <= 0.06 ok | 0.277 | 0.280 |
+| 0.04 | 0.06 | 12, 3, 3 | d026 | result-eligible | 200000 | 0.0437 | 0.0005 | 0.0446 | upper95 <= 0.06 ok | 0.294 | 0.290 |
+| 0.04 | 0.06 | 12, 5, 5 | d026 | result-eligible | 200000 | 0.0442 | 0.0005 | 0.0451 | upper95 <= 0.06 ok | 0.382 | 0.380 |
+| 0.06 | 0.03 | 8, 3, 3 | d026 | result-eligible | 200000 | 0.0399 | 0.0004 | 0.0408 | upper95 <= 0.06 ok | 0.148 | 0.147 |
+| 0.06 | 0.03 | 8, 5, 5 | d026 | result-eligible | 200000 | 0.0388 | 0.0004 | 0.0396 | upper95 <= 0.06 ok | 0.161 | 0.160 |
+| 0.06 | 0.03 | 12, 3, 3 | d026 | result-eligible | 200000 | 0.0431 | 0.0005 | 0.0440 | upper95 <= 0.06 ok | 0.204 | 0.200 |
+| 0.06 | 0.03 | 12, 5, 5 | d026 | result-eligible | 200000 | 0.0435 | 0.0005 | 0.0444 | upper95 <= 0.06 ok | 0.220 | 0.218 |
+| 0.06 | 0.06 | 8, 3, 3 | d026 | result-eligible | 200000 | 0.0397 | 0.0004 | 0.0405 | upper95 <= 0.06 ok | 0.120 | 0.116 |
+| 0.06 | 0.06 | 8, 5, 5 | d026 | result-eligible | 200000 | 0.0395 | 0.0004 | 0.0404 | upper95 <= 0.06 ok | 0.135 | 0.137 |
+| 0.06 | 0.06 | 12, 3, 3 | d026 | result-eligible | 200000 | 0.0435 | 0.0005 | 0.0444 | upper95 <= 0.06 ok | 0.158 | 0.157 |
+| 0.06 | 0.06 | 12, 5, 5 | d026 | result-eligible | 200000 | 0.0436 | 0.0005 | 0.0445 | upper95 <= 0.06 ok | 0.188 | 0.186 |
+
+Informational, not result-eligible (old D-016/D-019 test, unbalanced):
+
+| sigma_sub | sigma_seed | K, n_p, n_c | test | eligibility | grids | FWER | MC SE | upper 95% | criterion | power 15pp (MC) | power 15pp (analytic) |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| 0.00 | 0.03 | 8, 1, 3 | d016 | not result-eligible (informational) | 200000 | 0.0027 | 0.0001 | 0.0029 | — (no pass/fail) | 0.591 | 0.797 |
+| 0.00 | 0.03 | 8, 2, 3 | d016 | not result-eligible (informational) | 200000 | 0.0024 | 0.0001 | 0.0026 | — (no pass/fail) | 0.767 | 0.860 |
+| 0.00 | 0.03 | 12, 2, 3 | d016 | not result-eligible (informational) | 200000 | 0.0070 | 0.0002 | 0.0074 | — (no pass/fail) | 0.917 | 0.954 |
+| 0.00 | 0.03 | 8, 2, 5 | d016 | not result-eligible (informational) | 200000 | 0.0016 | 0.0001 | 0.0018 | — (no pass/fail) | 0.896 | 0.970 |
+| 0.00 | 0.03 | 12, 2, 5 | d016 | not result-eligible (informational) | 200000 | 0.0057 | 0.0002 | 0.0061 | — (no pass/fail) | 0.976 | 0.997 |
+| 0.00 | 0.06 | 8, 1, 3 | d016 | not result-eligible (informational) | 200000 | 0.0026 | 0.0001 | 0.0028 | — (no pass/fail) | 0.183 | 0.383 |
+| 0.00 | 0.06 | 8, 2, 3 | d016 | not result-eligible (informational) | 200000 | 0.0023 | 0.0001 | 0.0025 | — (no pass/fail) | 0.269 | 0.451 |
+| 0.00 | 0.06 | 12, 2, 3 | d016 | not result-eligible (informational) | 200000 | 0.0067 | 0.0002 | 0.0070 | — (no pass/fail) | 0.456 | 0.599 |
+| 0.00 | 0.06 | 8, 2, 5 | d016 | not result-eligible (informational) | 200000 | 0.0016 | 0.0001 | 0.0018 | — (no pass/fail) | 0.476 | 0.666 |
+| 0.00 | 0.06 | 12, 2, 5 | d016 | not result-eligible (informational) | 200000 | 0.0055 | 0.0002 | 0.0058 | — (no pass/fail) | 0.690 | 0.830 |
+| 0.02 | 0.03 | 8, 1, 3 | d016 | not result-eligible (informational) | 200000 | 0.0105 | 0.0002 | 0.0109 | — (no pass/fail) | 0.492 | 0.601 |
+| 0.02 | 0.03 | 8, 2, 3 | d016 | not result-eligible (informational) | 200000 | 0.0100 | 0.0002 | 0.0104 | — (no pass/fail) | 0.610 | 0.654 |
+| 0.02 | 0.03 | 12, 2, 3 | d016 | not result-eligible (informational) | 200000 | 0.0221 | 0.0003 | 0.0228 | — (no pass/fail) | 0.781 | 0.804 |
+| 0.02 | 0.03 | 8, 2, 5 | d016 | not result-eligible (informational) | 200000 | 0.0157 | 0.0003 | 0.0163 | — (no pass/fail) | 0.734 | 0.783 |
+| 0.02 | 0.03 | 12, 2, 5 | d016 | not result-eligible (informational) | 200000 | 0.0367 | 0.0004 | 0.0375 | — (no pass/fail) | 0.866 | 0.910 |
+| 0.02 | 0.06 | 8, 1, 3 | d016 | not result-eligible (informational) | 200000 | 0.0054 | 0.0002 | 0.0058 | — (no pass/fail) | 0.174 | 0.308 |
+| 0.02 | 0.06 | 8, 2, 3 | d016 | not result-eligible (informational) | 200000 | 0.0052 | 0.0002 | 0.0055 | — (no pass/fail) | 0.240 | 0.356 |
+| 0.02 | 0.06 | 12, 2, 3 | d016 | not result-eligible (informational) | 200000 | 0.0133 | 0.0003 | 0.0138 | — (no pass/fail) | 0.399 | 0.483 |
+| 0.02 | 0.06 | 8, 2, 5 | d016 | not result-eligible (informational) | 200000 | 0.0061 | 0.0002 | 0.0065 | — (no pass/fail) | 0.413 | 0.505 |
+| 0.02 | 0.06 | 12, 2, 5 | d016 | not result-eligible (informational) | 200000 | 0.0180 | 0.0003 | 0.0186 | — (no pass/fail) | 0.590 | 0.668 |
+| 0.04 | 0.03 | 8, 1, 3 | d016 | not result-eligible (informational) | 200000 | 0.0433 | 0.0005 | 0.0442 | — (no pass/fail) | 0.312 | 0.293 |
+| 0.04 | 0.03 | 8, 2, 3 | d016 | not result-eligible (informational) | 200000 | 0.0362 | 0.0004 | 0.0370 | — (no pass/fail) | 0.324 | 0.311 |
+| 0.04 | 0.03 | 12, 2, 3 | d016 | not result-eligible (informational) | 200000 | 0.0507 | 0.0005 | 0.0517 | — (no pass/fail) | 0.436 | 0.423 |
+| 0.04 | 0.03 | 8, 2, 5 | d016 | not result-eligible (informational) | 200000 | 0.0612 | 0.0005 | 0.0622 | — (no pass/fail) | 0.390 | 0.357 |
+| 0.04 | 0.03 | 12, 2, 5 | d016 | not result-eligible (informational) | 200000 | 0.0761 | 0.0006 | 0.0773 | — (no pass/fail) | 0.502 | 0.483 |
+| 0.04 | 0.06 | 8, 1, 3 | d016 | not result-eligible (informational) | 200000 | 0.0178 | 0.0003 | 0.0184 | — (no pass/fail) | 0.159 | 0.186 |
+| 0.04 | 0.06 | 8, 2, 3 | d016 | not result-eligible (informational) | 200000 | 0.0174 | 0.0003 | 0.0179 | — (no pass/fail) | 0.182 | 0.205 |
+| 0.04 | 0.06 | 12, 2, 3 | d016 | not result-eligible (informational) | 200000 | 0.0341 | 0.0004 | 0.0349 | — (no pass/fail) | 0.276 | 0.283 |
+| 0.04 | 0.06 | 8, 2, 5 | d016 | not result-eligible (informational) | 200000 | 0.0326 | 0.0004 | 0.0334 | — (no pass/fail) | 0.278 | 0.260 |
+| 0.04 | 0.06 | 12, 2, 5 | d016 | not result-eligible (informational) | 200000 | 0.0586 | 0.0005 | 0.0597 | — (no pass/fail) | 0.383 | 0.362 |
+| 0.06 | 0.03 | 8, 1, 3 | d016 | not result-eligible (informational) | 200000 | 0.0699 | 0.0006 | 0.0711 | — (no pass/fail) | 0.179 | 0.141 |
+| 0.06 | 0.03 | 8, 2, 3 | d016 | not result-eligible (informational) | 200000 | 0.0478 | 0.0005 | 0.0487 | — (no pass/fail) | 0.157 | 0.146 |
+| 0.06 | 0.03 | 12, 2, 3 | d016 | not result-eligible (informational) | 200000 | 0.0520 | 0.0005 | 0.0529 | — (no pass/fail) | 0.209 | 0.198 |
+| 0.06 | 0.03 | 8, 2, 5 | d016 | not result-eligible (informational) | 200000 | 0.0646 | 0.0005 | 0.0657 | — (no pass/fail) | 0.182 | 0.157 |
+| 0.06 | 0.03 | 12, 2, 5 | d016 | not result-eligible (informational) | 200000 | 0.0643 | 0.0005 | 0.0654 | — (no pass/fail) | 0.235 | 0.215 |
+| 0.06 | 0.06 | 8, 1, 3 | d016 | not result-eligible (informational) | 200000 | 0.0428 | 0.0005 | 0.0437 | — (no pass/fail) | 0.126 | 0.107 |
+| 0.06 | 0.06 | 8, 2, 3 | d016 | not result-eligible (informational) | 200000 | 0.0365 | 0.0004 | 0.0373 | — (no pass/fail) | 0.122 | 0.114 |
+| 0.06 | 0.06 | 12, 2, 3 | d016 | not result-eligible (informational) | 200000 | 0.0496 | 0.0005 | 0.0506 | — (no pass/fail) | 0.167 | 0.155 |
+| 0.06 | 0.06 | 8, 2, 5 | d016 | not result-eligible (informational) | 200000 | 0.0618 | 0.0005 | 0.0628 | — (no pass/fail) | 0.169 | 0.131 |
+| 0.06 | 0.06 | 12, 2, 5 | d016 | not result-eligible (informational) | 200000 | 0.0745 | 0.0006 | 0.0756 | — (no pass/fail) | 0.215 | 0.180 |
+
+Fake end-to-end, K = 8, n = 3, oracle +0.25, length_heuristic 0 (configs in the scratchpad: protocol copy with 8
+`random_subset_seeds` 2000–2007, grid copy with n_subsets 8, fake params with train_seeds [0, 1, 2], sleep 0; the
+repo protocol still lists 3 subset seeds, see decisions):
+```
+rabc v1 [weighting] budget 1.0: progress + 8 permutation parquets; computed in 0.21s, GPU-h 0.000, rollouts 0, key a54930fab8b0
+length_heuristic v1 [selection] budget 0.5: 25 episodes; computed in 0.00s, GPU-h 0.000, rollouts 0, key ad56eba12505
+selections -> /Users/vivek/robocurate-scratch/selections/m1-e2e-d026
+[done]    bc5c5f6fb94af264  oracle b=0.5 seed=2
+done=60 skipped_existing=0 skipped_locked=0 reclaimed_stale_locks=0
+site: /Users/vivek/robocurate-scratch/site-fake-d026/index.html
+*** FAKE RESULTS (synthetic backend) ***
+task aloha_transfer_cube budget 0.5 (selection):
+  full                         runs=3   mean=0.528  cell 5c055b8f910e
+  random                       runs=24  mean=0.500  cell e5267b2f86c9
+  oracle                       runs=3   mean=0.697  cell b8be368d553c
+  cleaner:length_heuristic     runs=3   mean=0.497  cell 186cc0bd36cb
+  cleaner:length_heuristic vs placebo [D-026]: diff=-0.003 SE=0.052 df=7 p_holm=0.957 not significant   (Welch secondary p_holm=0.891)
+  [ref] oracle vs placebo: diff=+0.197 p=0.00684 SIGNIFICANT
+  [ref] full vs placebo: diff=+0.029 p=0.459 not significant
+  s_sub=0.037 s_seed=0.056 K=8 n_p=3 n_c=3  MDE (80% power): 0.170
+task aloha_transfer_cube full data (weighting):
+  full                         runs=3   mean=0.528  cell 5c055b8f910e
+  weighting:rabc               runs=3   mean=0.495  cell a03b0f077b04
+  weight_placebo:rabc          runs=24  mean=0.478  cell 167857559e44
+  weighting:rabc vs placebo [D-026]: diff=+0.017 SE=0.039 df=7 p_holm=0.664 not significant   (Welch secondary p_holm=0.838)
+  [ref] full vs placebo: diff=+0.051 p=0.244 not significant
+  s_sub=0.000 (truncated) s_seed=0.065 K=8 n_p=3 n_c=3  MDE (80% power): 0.126
+wrote /Users/vivek/robocurate-scratch/results/m1-e2e-d026/report.md, /Users/vivek/robocurate-scratch/results/m1-e2e-d026/leaderboard.json
+cell b8be368d553c: task aloha_transfer_cube budget 0.5 condition {'kind': 'oracle'} (3 runs, kind fake)
+git: 35e8b78d76 (dirty)
+config <scratchpad>/e2e_d026/protocol_k8.yaml: sha256 8d28b83b7b42 ok
+config /Users/vivek/Developer/CODES/RoboCurate-Bench/configs/tasks/aloha_transfer_cube.yaml: sha256 37eef6888ecb ok
+config <scratchpad>/e2e_d026/grid_k8.yaml: sha256 6ac27745efb4 ok
+config <scratchpad>/e2e_d026/fake_n3.yaml: sha256 3e3db93deabc ok
+commands:
+  robocurate prepare <scratchpad>/e2e_d026/grid_k8.yaml --backend fake --selections-dir <SELECTIONS>
+  robocurate run <scratchpad>/e2e_d026/grid_k8.yaml --backend fake --fake-params <scratchpad>/e2e_d026/fake_n3.yaml --results-dir /Users/vivek/robocurate-scratch/results/m1-e2e-d026 --selections-dir /Users/vivek/robocurate-scratch/selections/m1-e2e-d026
+re-executed: MATCH 3/3
+```
+Oracle (reference, D-026 test): +0.197, p = 0.0068, significant. length_heuristic: −0.003, p_holm 0.957, not
+significant. rabc vs its 8 permutations: +0.017, p_holm 0.664. Full vs placebo: not significant. Reproduce MATCH 3/3.
 
 ## Blocked
 
-- **B-004 (2026-11-19T13:55Z, OPEN) — the D-019/D-024 test misses the 0.06 bound on result-eligible designs with n_c > n_p.**
+- **B-006 (2026-11-19T15:10Z, OPEN) — no scratch path on hokkaido; Step 2 outcome (c), Step 3 skipped.**
+  - *Evidence (read-only).* `ssh hokkaido 'ls -ld /disk /disk/u; ls /disk; ...'`: "ls: cannot access '/disk': No such
+    file or directory" (twice). Mounts: `/` = local NVMe `/dev/nvme0n1p2` (1.8 T, 98% used, 52 G free);
+    `/share/NFS` (baushare, 104 T, 31 T free); `/share/datasets` (baunas24, 98 T, 42 T free). `$HOME` =
+    `/share/NFS/u/vivek`. `id`: uid 1176, group `research`. `/share/projects`, `/share/u`, `/share/data/datasets` do
+    not exist on hokkaido; `/share/NFS/projects` exists (`dr-xr-xr-x`, owner uid 1027: not writable for us);
+    `/share/datasets` is `drwxrwxr-x root:research` (group-writable; 18 entries, other users' dirs inside).
+  - *Wiki* (github.com/thebaulab/onramp.wiki @ ec6b6665, 2026-10-27). Filesystems-on-bau-clusters.md: "On some
+    machines there is a local `/disk` directory ... `/disk/u/[username]` for your own personal directories";
+    NFS-Storage-Administration.md "Where Should I Put My Files?": temporary/scratch files → `/disk/` (local disk);
+    large datasets (>10GB) → `/share/datasets/` ("baunas24 has space; baushare is full"); shared project files →
+    `/share/projects/projectname/`. Network-Architecture.md: "Each GPU machine also has local disk at `/disk/`" (not
+    true for hokkaido today). Accessing-Clusters.md lists hokkaido as "Shared".
+  - *Decision rule.* (a) The wiki's scratch convention is `/disk/u/<user>`, which cannot be followed (no `/disk`).
+    (b) `/disk/u` does not exist. → (c): stop Step 2, no directory created, no D-027.
+  - *Candidates (not chosen).* (1) Ask the lab admin to provision `/disk` on hokkaido (the wiki convention).
+    (2) `/share/datasets/robocurate` on baunas24 (group-writable, the wiki's place for >10 GB data; NFS, so slower
+    I/O, and it is the "datasets" share, not scratch). (3) A directory on the local system disk, e.g.
+    `/tmp/vivek-robocurate` (fast, but 52 G free on a 98%-full system disk; the wiki says not to write outside
+    `/share` and `/disk`). (4) `$HOME` is excluded by CLAUDE.md.
+
+- **B-005 (2026-11-19T15:30Z, OPEN) — the D-025 placebo cannot be trained with LeRobot 0.6.1 as is.**
+  - *Fact.* lerobot-train applies per-sample weights only via `--sample_weighting.type` in {rabc, uniform}
+    (utils/sample_weighting.py:125-132, no hook for precomputed weights). RA-BC computes weights from a progress
+    parquet: delta = progress[t + chunk_size] − progress[t] (last frame near the end, rewards/sarm/rabc.py:237-260),
+    then Eq. 8-9 with global stats (rabc.py:262-295). D-025 defines the placebo on WEIGHT curves (permute, resample,
+    rescale); an arbitrary resampled weight curve is not in general the RA-BC image of any progress curve (weights
+    near episode ends are tied to the last frame's progress), so the placebo cannot be encoded as a progress parquet.
+    Batch weights are renormalized to sum to the batch size (rabc.py:232-233) and the loss divides by the weight sum
+    (lerobot_train.py:162), so D-025's global rescale is a no-op for LeRobot training (harmless).
+  - *Done.* `permute_weight_curves` (D-025) with tests; `prepare` writes the entrant's RA-BC frame weights
+    (`weights.parquet`, our mirror equal to LeRobot's RABCWeights before batch normalization) and the 8 D-025
+    placebo weight parquets; the local backend refuses `weight_placebo` runs (test). The D-020 progress permutation
+    is no longer written. The fake backend is unaffected.
+  - *Options (decision needed).* (1) A thin launcher around lerobot-train that registers a precomputed-weights
+    weighter (reads our weights parquet, same batch normalization as RABCWeights) for BOTH arms (entrant weights =
+    our RA-BC mirror, placebo = D-025), leaving the training loop untouched. (2) Keep LeRobot's RA-BC for the
+    entrant and define the placebo on progress curves (D-020 interpretation, rejected by D-025). (3) Contribute a
+    precomputed-weights sample-weighting type upstream and pin the release that has it.
+
+- **B-004 (RESOLVED by D-026; 2026-11-19T13:55Z) — the D-019/D-024 test misses the 0.06 bound on result-eligible designs with n_c > n_p.**
   Stop condition (B-003 task, Step 1): "If any allowed cell fails the bound, STOP and report the table. Do not
   adjust the test."
   - *What was run.* `test_primary_test_null_calibration` with the eligible cells = the M0 power-table designs the task

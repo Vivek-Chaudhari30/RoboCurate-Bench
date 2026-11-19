@@ -206,11 +206,25 @@ def test_flag_checker_rejects_invented_flags(tmp_path):
         assert not _flag_ok(TrainPipelineConfig, invented, cmd + [invented]), invented
 
 
-def _help(binary: str) -> str:
+def _console_script(binary: str) -> str | None:
+    """The env's console script next to sys.executable (works when the env's bin is not on PATH)."""
     import shutil
+    import sys
 
-    exe = shutil.which(binary)
-    assert exe, f"{binary} not on PATH"
+    exe = Path(sys.executable).parent / binary
+    return str(exe) if exe.exists() else shutil.which(binary)
+
+
+def test_console_script_resolves_without_path(monkeypatch):
+    """Regression: test_flags_exist_in_help_or_dataclasses failed when the env's bin dir was not on PATH."""
+    monkeypatch.setenv("PATH", "/usr/bin:/bin")
+    exe = _console_script("lerobot-train")
+    assert exe and Path(exe).exists() and Path(exe).parent == Path(__import__("sys").executable).parent
+
+
+def _help(binary: str) -> str:
+    exe = _console_script(binary)
+    assert exe, f"{binary} not found next to sys.executable or on PATH"
     return subprocess.run([exe, "--help"], capture_output=True, text=True, timeout=300).stdout
 
 
