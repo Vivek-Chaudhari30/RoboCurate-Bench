@@ -61,7 +61,8 @@ Entrants:
 | `rabc` | weighting | wrapped (LeRobot RA-BC) |
 | `demo_score` | selection | reimplementation |
 | `deminf` | selection | reimplementation |
-| `cupid` | selection | reimplementation — **disabled (failed toybed sanity on ACT-style and diffusion toybeds, D-029)**; refused in grids, excluded from the leaderboard |
+| `cupid` | selection | reimplementation — **disabled (failed toybed sanity on ACT-style and diffusion toybeds, D-029, D-036)**; refused in grids, excluded from the leaderboard |
+| `gradsim_return` | selection | original (D-036; CUPID objective + TracIn similarity) — enabled for diffusion only (toybed AUROC 1.000; ACT-style 0.383) |
 | `rcb_score` | selection | ours, v1 frozen |
 
 Baselines are random subsets, full data and the oracle.
@@ -82,6 +83,17 @@ robocurate submit examples/cleaner_template/src/rcb_template_cleaner/cleaner.py
 ```
 
 To submit your own cleaner, see [docs/submit.md](docs/submit.md).
+
+## Related work
+
+CuraEval (Xu et al., arXiv 2610.38221, CoRL 2026 workshop) compares demonstration-curation methods with
+size-matched random subsets and full data on real mixed-skill robomimic data, and finds that apparent gains shrink
+or vanish when checkpoint reporting, rollout count and evaluation seeds change. RoboCurate-Bench shares its core
+controls (training run as the unit of analysis, size-matched random subsets, full-data reference, Holm correction,
+200 rollouts) and is stricter on design: K >= 8 placebo subsets with a balanced test that models subset variance,
+final checkpoints only, frozen disjoint seed blocks and a written pre-registration. CuraEval covers what we do not:
+real operator-skill variation, robomimic tasks, BC-RNN, and analyses of what curation scores measure; see
+[docs/related_work.md](docs/related_work.md).
 
 ## Limitations
 
@@ -105,8 +117,10 @@ To submit your own cleaner, see [docs/submit.md](docs/submit.md).
   exact Hessian and 4,000 rollouts), although those demos halve closed-loop success. This is a limitation of the
   method family on unimodal policies, not a verdict on CUPID. CUPID was also tested in its native setting, a toy
   diffusion policy with the official "square" output, 64 timesteps, d = 4000 and lambda = 0: AUROC 0.51–0.52 over
-  3 seeds, below the 0.8 pass bar, with a near-singular TRAK Gram matrix. It therefore stays disabled on every task
-  (PROGRESS.md, CUPID sanity investigation and CUPID diffusion toybed).
+  3 seeds, below the 0.8 pass bar, with a near-singular TRAK Gram matrix. It therefore stays disabled on every task.
+  Evidence: [docs/findings_cupid.md](docs/findings_cupid.md). The pre-registered influence entrant is
+  gradsim-return (D-036): CUPID's return-weighted objective with plain gradient similarity (TracIn); toybed AUROC
+  1.000 on diffusion (enabled for diffusion tasks) and 0.383 on the ACT-style toybed (not enabled for ACT).
 
 ## License
 
@@ -138,6 +152,9 @@ Verified on 2026-11-19 against the arXiv API, the venue pages, Crossref or PyPI.
   it compares curation methods with size-matched random subsets and full-data training on mixed-skill robomimic
   data with Diffusion Policy and BC-RNN, and reports that apparent gains shrink when checkpoint reporting, rollout
   count and evaluation seeds change together.
+- **TracIn**: Pruthi, Liu, Sundararajan, Kale, "Estimating Training Data Influence by Tracing Gradient Descent",
+  NeurIPS 2020, arXiv 2002.08484. gradsim-return (D-036) uses its gradient-similarity comparison with CUPID's
+  return-weighted rollout objective.
 - **RA-BC / SARM**: Chen et al., "SARM: Stage-Aware Reward Modeling for Long Horizon Robot Manipulation", arXiv
   2509.25358 (Eq. 8-9 as implemented in lerobot `rewards/sarm/rabc.py`).
 - **Robometer**: Liang et al., "Robometer: Scaling General-Purpose Robotic Reward Models via Trajectory
