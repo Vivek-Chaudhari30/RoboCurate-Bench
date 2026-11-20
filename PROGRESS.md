@@ -9,7 +9,203 @@ retried later, items that need the Hub continue when it is back.
 |---|---|---|---|---|
 | 2026-11-19T21:25Z | 1 decisions | D-033..D-038 appended verbatim; protocol.yaml generation_seed_range [700000, 799999] (D-034) and eval_batch_size {pusht_diffusion: TBD} (D-035); ProtocolConfig fields + disjointness check + task_eval_batch_size(); data-generation rollouts (mixture.policy_rollout_seeds) moved from curation seeds to generation seeds | default 260 passed + 1 skipped + 1 xfailed (2 seed tests updated, 2 new protocol tests); ruff clean | done |
 | 2026-11-19T21:29Z | 2 deps + license | [pusht] extra pinned: gym-pusht 0.1.8, pymunk 6.11.1, diffusers 0.39.0 (the D-030 venv versions) + opencv-python 4.13.0.92 (gym-pusht needs opencv-python; pinned to the locked opencv-python-headless version because both ship cv2 and lerobot needs <4.14; the venv had 4.14.0.94). Installed into rcb: freeze diff = 11 additions, 0 changes; cv2 still 4.13.0; pip check clean. ONE lock: requirements.lock regenerated (pip freeze --exclude-editable). PushT env test now a hard import (runs, passes). LICENSE = apache.org text, sha256 cfc7749b...3d30, identical on www.apache.org, apache.org and 5 copies shipped by other packages; pyproject license = "Apache-2.0" (SPDX) + license-files, build-system setuptools>=77; README License section | default 263 passed + 1 xfailed (0 skipped); build: no deprecation, License-Expression Apache-2.0, twine PASSED x2; ruff clean | done |
+| 2026-11-20T03:24Z | 2 deps + license | [pusht] extra locked (one lock), env test runs; LICENSE canonical; SPDX | default green; build + twine PASSED | done |
+| 2026-11-20T03:24Z | 3 scripted policy | ACT port (MIT, identical actions); two-stage generation (stage 1 mujoco 2.3.3); CPU Apple Software Renderer; 20/20 validation; 10 perturbed episodes; Task A v1 CPU part rebuilt (100) + validate-defects | test_scripted_aloha 5 + 1 slow; test_mixture_v1 11 | done |
+| 2026-11-20T03:24Z | 4 rollout recorder | LeRobot eval rollout with camera frames on generation seeds; gpu_phase_rollouts on D-033 checkpoints; fake-checkpoint dry run | test_rollout_recorder 1 + 3 slow | done |
+| 2026-11-20T03:24Z | 5 prepare local | local_context_factory + CLI; CPU entrants on real data; GPU entrants mocked on CPU | test_prepare_local 6 | done |
+| 2026-11-20T03:24Z | 6 gradsim-return | entrant (no knobs) + per-family enablement; AUROC diffusion 1.000 (enabled), MLP 0.383 (not); findings_cupid.md; TracIn bib | test_entrants gradsim 2 + 1 slow; family test | done |
+| 2026-11-20T03:24Z | 7 launch kit | D-035 stage c/d, D-033 keep, runbook; dry runs both tasks PASS | test_launch 15 | done |
+| 2026-11-20T03:24Z | 8 Task B mixture | checked vs D-031/D-037: no deviation (comments + explicit seed offset) | test_mixture_v1 | done |
+| 2026-11-20T03:24Z | 9 CuraEval | docs/related_work.md + README summary | n/a | done |
+| 2026-11-20T03:24Z | 10 prereg | updated for D-033..D-038, not tagged, deviations log empty | n/a | done |
 <!-- cpu2-log -->
+
+## CPU completion 2 details (overnight 3)
+
+**Item 2: dependencies, lock, license**
+- `[pusht]` extra: gym-pusht 0.1.8, pymunk 6.11.1 and diffusers 0.39.0 (the versions from the D-030 venv), plus
+  opencv-python 4.13.0.92.
+  - opencv-python is pinned to the same version as the locked opencv-python-headless. gym-pusht requires
+    opencv-python, both distributions ship `cv2`, and lerobot requires `<4.14`. The venv had 4.14.0.94; installing
+    that would have replaced the locked cv2.
+- Installed into rcb: the freeze diff is 11 additions and 0 changes, cv2 stays 4.13.0, and `pip check` is clean.
+- **One lock:** `requirements.lock` regenerated with `pip freeze --exclude-editable`. The PushT env test is now a
+  hard import, and it runs and passes in rcb.
+- LICENSE is the apache.org text: sha256 cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30,
+  identical on www.apache.org, apache.org, and five copies shipped by absl-py, datasets, dm-tree, labmaze and
+  lazy-importer.
+- pyproject: `license = "Apache-2.0"` plus `license-files`; build-system setuptools>=77 (PEP 639). The build has no
+  deprecation warning and shows License-Expression Apache-2.0; `twine check` PASSED.
+
+**Item 3: scripted transfer-cube policy and the 10 perturbed episodes**
+- *Source.* tonyzhaozh/act@742c753c0d4a5d87076c8f69e5628c79a8cc5488, MIT (Copyright (c) 2023 Tony Z. Zhao).
+  Ported with the MIT notice to `src/robocurate/sim/scripted_aloha.py`:
+  - `scripted_policy.py:12-104`: the policy;
+  - `record_sim_episodes.py:46-155`: the procedure.
+
+  Quaternions follow pyquaternion@99025c17 (`quaternion.py:238-258, 389-391, 580-587`), with no new dependency.
+  **The port is identical to ACT's original:** max |difference in action| = 0.0 over 10 episodes × 400 steps, run
+  side by side under mujoco 2.3.3.
+- *Mapping to gym-aloha 0.1.5.*
+  - The end-effector env refuses to construct in gym-aloha (`env.py:120-124` raises NotImplementedError), so it is
+    built the way that code would build it.
+  - gym-aloha samples the cube pose unseeded (`sim_end_effector.py:148`). The port uses `sample_box_pose(seed)`,
+    the same pose `AlohaEnv.reset(seed)` uses (`env.py:159-160`).
+  - The replay runs in `AlohaEnv("transfer_cube", obs_type="pixels_agent_pos")`.
+- *Simulator finding.* ACT's own unmodified code succeeds 5/5 under its pinned mujoco 2.3.3 / dm_control 1.0.9
+  (act conda_env.yaml) and **0/5 under mujoco 3.8.1** (the benchmark's version). The models are identical; only
+  trailing newlines differ.
+  - The weld semantics are documented the same in both versions: relpose from qpos0 (XMLreference 2.3.3:4418-4424,
+    3.8.1:4689-4697). A raw hold test drifts the same in both.
+  - The cause is a 3.x dynamics change in the end-effector (mocap) stage. No documented switch exists for it, and
+    I tuned no simulator flags.
+- *Procedure therefore.*
+  - **Stage 1** (end-effector rollout): ACT's simulator, in a scratch env (`$ROBOCURATE_SCRATCH/venvs/mj233`:
+    python 3.11, mujoco 2.3.3, dm_control 1.0.9, gym-aloha 0.1.5 --no-deps; not part of the lock).
+  - **Stage 2** (joint replay, recording, success): the benchmark env, gym-aloha 0.1.5 / mujoco 3.8.1.
+  - Stage 2 renders on the CPU **Apple Software Renderer** through CGL (`src/robocurate/sim/cpu_render.py`):
+    kCGLPFARendererID 70 with kCGLRendererGenericFloatID 0x00020400 (SDK CGLTypes.h:69, CGLRenderers.h:15), and the
+    renderer string is checked. This is needed because dm_control counts glfw/egl as GPU (`_render/__init__.py:109`)
+    and MuJoCo refuses osmesa on macOS (`gl_context.py:25-34`). An OSMesa attempt (conda-forge mesalib 24.3.4 in
+    scratch) was dropped and its prefix deleted.
+- *Validation* (generation seeds 790000-790019): stage 1 succeeded 30/30. **Stage 2 success
+  1.00 (20/20).**
+  - Replay vs scripted gripper path: median at most 3.9
+    mm and p95 at most 1.47 cm.
+  - Tolerances from ACT: p95 within the cube half-size 0.02 m (model geom size), median within ACT's end-effector
+    noise scale 0.01 m (scripted_policy.py:56).
+  - The worst single step is 4.7 cm, in the first two steps
+    (start-up transient).
+- *D-037 jitter.* The community HF-power-share median among jittery episodes is **0.3856**: 22 episodes, all in
+  kmg0620 (recomputed per episode; it reproduces the stats-file p95 of 0.4058). **sigma = 0.643** (whole episode,
+  all 14 actions) puts the median share of the 50 Hub scripted episodes at 0.3856. Failed grasp: right gripper
+  (dim 13) forced to 1.0 from frame 135.
+- *10 perturbed episodes* (generation seeds 700000-700009; `configs/mixtures/task_a_v1_scripted_replay.yaml`): 5
+  jitter and 5 gripper_drop, **all 10 fail**, as expected for the bad tier.
+  - LeRobot dataset with top-camera video, `$ROBOCURATE_SCRATCH/generation/task_a_v1/scripted_replay`.
+  - Labels: source scripted; defects; `perturbation_params` (a new optional label field, JSON); success.
+- *Task A v1 CPU part rebuilt:* 40 Hub scripted + 10 perturbed + 50 human = 100 episodes, 337 s.
+  - New `sources[].root` and `labels: sidecar` carry the source labels. Explicit `seed_offset: 10` keeps the policy
+    rollouts off the replay seeds.
+  - validate-defects:
+    - matches the community: interior pause rate 0.50 (community median 0.50), interior pause p50 0.92 s
+      (community medians 0.62-1.20 s), exact duplicates 0;
+    - episodes with share > 0.10: 0.05 (the 5 jittered; the community has 0 in 4 datasets and 0.147 in kmg0620);
+    - jittered episodes' HF share 0.33-0.38, median 0.352 vs the 0.386 target: 4 of the 5 also received an
+      injected pause, whose held frames lower the share; the jitter-only episode reaches 0.381;
+    - near-duplicate pairs: 8 (scripted trajectories are near-identical by design; the community has 0).
+
+**Item 4: rollout recorder.**
+- `src/robocurate/sim/rollout_recorder.py` loads a checkpoint as lerobot-eval does
+  (scripts/lerobot_eval.py:740-781) and runs LeRobot's `rollout(..., return_observations=True)` (:167-182,
+  :391-405) on generation seeds only (D-034 guard).
+- It records camera frames, state and executed actions, optionally with replay perturbations wrapped around each
+  sub-env, and writes the labels (policy, checkpoint step, success, perturbation parameters).
+- Tested with a tiny random ACT saved like lerobot-train saves one (common/train_utils.py:156-166): 2 episodes,
+  the dataset loads, labels are correct, and the perturbation is executed.
+- `launch/rollouts.py` and `scripts/gpu_phase_rollouts.sh` use the D-033 checkpoints (`checkpoints/<round(f·S)>`)
+  with generation seeds from each source's offset. The `--fake-checkpoints` dry run is a slow test: 4 checkpoints,
+  seeds from 700010.
+
+**Item 5: `prepare --backend local`.**
+- `LocalResources` + `local_context_factory` inject the dataset root, the progress model, the rollout backend and
+  the reference policy. The CLI loads the real mixture view (`hub.load_view`).
+- GPU entrants run on the given device; `cpu` is allowed with tiny or mocked models, and a cuda request without
+  CUDA is refused.
+- Tests:
+  - length and kinema on a real LeRobot dataset;
+  - robometer_filter, rcb_score and rabc with a mocked progress model on CPU;
+  - gradsim_return and demo_score with toybed policies (100 curation-seed rollouts);
+  - missing resources refused;
+  - the CLI end to end.
+- **CPU entrants on the real Task A v1 CPU part** (100 episodes, budget 0.5; `robocurate prepare --backend local`
+  with `--dataset-root`). Only runtime and selection size were recorded. The selection files were not opened, and
+  no quality metric was computed.
+
+  | entrant | selected | runtime |
+  |---|---|---|
+  | length_heuristic | 50 | 0.00 s |
+  | lerobot_doctor | 50 | 0.15 s |
+  | kinema | 50 | 0.35 s |
+  | roboaudit | 50 | 123 s |
+  | rda | 50 | 542 s |
+  | deminf | 50 | 788 s |
+
+  All six run end to end on real data.
+
+**Item 6: gradsim-return (D-036).**
+- `src/robocurate/cleaners/entrants/gradsim_return.py`:
+  - CUPID's return-weighted rollout objective with CUPID's model-output gradients (diffusion: square output, 64
+    timesteps; unimodal: BC loss);
+  - an exact dot product, with no Hessian, no Gram matrix, no projection and no parameters of its own;
+  - credits CUPID and TracIn; TracIn bib entry verified (arXiv 2002.08484v3, NeurIPS 2020).
+- Toybed AUROC with the pre-declared setups:
+
+  | toybed | AUROC | rollouts | enabled |
+  |---|---|---|---|
+  | diffusion | **1.000** | 8/100 succeed | **yes** |
+  | MLP/ACT-style | **0.383** | 42/100 succeed | **no** |
+
+- `enabled_policy_families = ("diffusion",)`. Per-family enablement lives in the registry and planner (ACT grids
+  refuse it; test). It is added to the Task B grid.
+- `docs/findings_cupid.md` written and linked from the README. CUPID stays disabled.
+
+**Item 7: launch kit.**
+- Stage c for diffusion runs after stage d and checks determinism at the protocol batch (D-035); ACT keeps batch
+  invariance (tests/test_gpu.py).
+- Stage d for diffusion writes `eval_batch_size.<task>` into protocol.yaml. In the dry run it writes to a copy;
+  repeat writes are refused.
+- Stage e keeps the D-033 checkpoints. The local backend uses the protocol batch for diffusion evals.
+- Dry run (fake backend, temp scratch):
+
+```text
+===== task a
+[a] GPU free after 0.33 h
+[b2] I/O-bound (util 35% < 50%, data 45% > 30%); retry with num_workers=8
+[b2] smoke: {'step_s': 0.12, 'data_frac': 0.08, 'gpu_util': 82.0, 'peak_mem_gb': 9.5, 'eval_s': 40.0, 'num_workers': 8, 'checkpoint': 'fake://smoke'}
+[c] GPU tests (determinism / batch invariance): PASS: fake: GPU tests not run (no GPU in the dry run)
+[d] eval timings (50 eps): {5: (300.0, 3.0), 10: (170.0, 5.0), 25: (95.0, 9.0), 50: (80.0, 14.0)}; eval batch 25; steps {'default': 100000, 'cap': 64708, 'S': 64700, 'capped': True, 'frac': 0.647, 'per_run_h': 2.499722222222222}; 
+[e] 11 runs to do (0 already done)
+[e] packing enabled: solo full-data run used 38% GPU, 6.0 GB
+[e] done=11 skipped=0 GPU-h=0.00 stop=None
+[f] analysis written to $TMP/state_a/m0_summary.md
+finished
+===== task b
+[a] GPU free after 0.33 h
+[b2] I/O-bound (util 35% < 50%, data 45% > 30%); retry with num_workers=8
+[b2] smoke: {'step_s': 0.12, 'data_frac': 0.08, 'gpu_util': 82.0, 'peak_mem_gb': 9.5, 'eval_s': 40.0, 'num_workers': 8, 'checkpoint': 'fake://smoke'}
+[d] eval timings (50 eps): {5: (300.0, 3.0), 10: (170.0, 5.0), 25: (95.0, 9.0), 50: (80.0, 14.0)}; eval batch 25; steps {'default': 100000, 'cap': 64708, 'S': 64700, 'capped': True, 'frac': 0.647, 'per_run_h': 2.499722222222222}; 
+[d] D-035: wrote eval_batch_size.pusht_diffusion = 25 -> $TMP/state_b/protocol.yaml (the only protocol write bef
+[c] GPU tests (determinism at the protocol eval batch (D-035)): PASS: fake: GPU tests not run (no GPU in the dry run)
+[e] 11 runs to do (0 already done)
+[e] packing enabled: solo full-data run used 38% GPU, 6.0 GB
+[e] done=11 skipped=0 GPU-h=0.00 stop=None
+[f] analysis written to $TMP/state_b/m0_summary.md
+finished
+```
+
+**Item 8: Task B mixture.**
+- Final composition: all 206 human demos plus 100 policy rollouts from the D-033 checkpoints (25 each at
+  10/30/60/100%; generation seeds 700000-700099, `seed_offset: 0`).
+- Pauses at rate 0.50, 6-12 frames; duplicates at rate 0; no wrong-task strings.
+- No replay perturbations: D-031's apply to scripted episodes, and PushT has none. D-037 would apply to policy
+  rollouts if they were added.
+- Only comments and the explicit offset changed; there was no deviation.
+
+**Item 9: CuraEval.** `docs/related_work.md` holds the comparison table (sections of arXiv 2610.38221v1, all
+paraphrased, no quotes) and the stricter / equal / theirs-covers summary. The README has a three-sentence summary.
+
+**Item 10: pre-registration (not tagged).** Updated for:
+- generation seeds;
+- the D-035 eval-batch rule;
+- the D-037 jitter and composition rows;
+- rollout sources (D-033/D-034);
+- gradsim-return in, enabled for diffusion only;
+- CUPID disabled, with the finding;
+- the license.
+
+The deviations log stays empty.
+
 
 ## Morning summary (non-GPU completion)
 
