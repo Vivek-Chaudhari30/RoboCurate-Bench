@@ -31,6 +31,7 @@ class EpisodeLabel:
     checkpoint_step: int | None = None
     success: bool | None = None
     perturbations: tuple[str, ...] = ()
+    perturbation_params: str = ""  # JSON list of the executed perturbations' parameters (replay mode, D-011/D-037)
 
     def __post_init__(self) -> None:
         if self.source not in SOURCES:

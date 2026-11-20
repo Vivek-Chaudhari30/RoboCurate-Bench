@@ -16,18 +16,61 @@ PROTO = load_protocol(REPO / "configs/protocol.yaml")
 
 def test_task_a_v1_recipe_matches_d031():
     r = M.Recipe.load(REPO / "configs/mixtures/task_a_v1.yaml")
-    by = {s.source: s.n_episodes for s in r.sources}
-    assert by == {"scripted": 40, "human": 50}
+    by = {(s.dataset, s.source): s.n_episodes for s in r.sources}
+    assert by == {("lerobot/aloha_sim_transfer_cube_scripted", "scripted"): 40,
+                  ("robocurate/task_a_v1_scripted_replay", "scripted"): 10,
+                  ("lerobot/aloha_sim_transfer_cube_human", "human"): 50}
+    local = next(s for s in r.sources if s.root)
+    assert local.labels == "sidecar" and local.resolved_root().endswith("generation/task_a_v1/scripted_replay")
     d = {x["name"]: x for x in r.deferred_sources}
-    assert d["scripted_replay"]["n_episodes"] == 10  # 20% of 50 scripted
-    assert sorted(p["type"] for p in d["scripted_replay"]["perturbations"]) == ["gripper_drop", "jitter"]
+    assert set(d) == {"policy_rollouts"}  # the replay-mode scripted episodes are generated (overnight 3)
     assert [c["train_fraction"] for c in d["policy_rollouts"]["checkpoints"]] == [0.1, 0.3, 0.6, 1.0]
     assert all(c["n_episodes"] == 25 for c in d["policy_rollouts"]["checkpoints"])
     assert sum(by.values()) + r.n_deferred_episodes == 200
     assert r.pause["rate"] == 0.5 and r.duplicate["rate"] == 0.0 and not r.wrong_task  # D-031
-    plan = M.plan_mixture(r, {s.dataset: [400] * 50 for s in r.sources})
-    assert sum("pause" in p.defects for p in plan) == 45 and not any("duplicate" in p.defects for p in plan)
-    assert len(plan) == 90 and all(31 <= p.pause_k <= 60 for p in plan if p.pause_k)
+    plan = M.plan_mixture(r, {s.dataset: [400] * (50 if s.n_episodes > 10 else 10) for s in r.sources})
+    assert sum("pause" in p.defects for p in plan) == 50 and not any("duplicate" in p.defects for p in plan)
+    assert len(plan) == 100 and all(31 <= p.pause_k <= 60 for p in plan if p.pause_k)
+
+
+def test_scripted_replay_spec_follows_d037():
+    import yaml
+
+    spec = M._check_deferred(yaml.safe_load((REPO / "configs/mixtures/task_a_v1_scripted_replay.yaml").read_text()),
+                             "spec")
+    kinds = {p["type"]: p for p in spec["perturbations"]}
+    assert spec["n_episodes"] == 10 and kinds["jitter"]["sigma"] == 0.643 and "sigma_range" not in kinds["jitter"]
+    assert kinds["gripper_drop"] == {"type": "gripper_drop", "n_episodes": 5, "onset": 135, "duration": 265,
+                                     "gripper_dims": [13], "open_value": 1.0}
+
+
+def test_sidecar_source_labels_merge_with_post_hoc_defects():
+    from robocurate.data.labels import EpisodeLabel
+
+    r = M.Recipe.load(REPO / "configs/mixtures/task_a_v1.yaml")
+    lens = {s.dataset: [400] * (50 if s.n_episodes > 10 else 10) for s in r.sources}
+    plan = M.plan_mixture(r, lens)
+    src = {"robocurate/task_a_v1_scripted_replay": {
+        i: EpisodeLabel(i, "scripted", "scripted_policy", 700000 + i, ("jitter",) if i < 5 else ("gripper_drop",),
+                        "bad", success=i % 2 == 0, perturbations=("jitter",) if i < 5 else ("gripper_drop",),
+                        perturbation_params='[{"sigma": 0.643, "type": "jitter"}]' if i < 5 else "[]")
+        for i in range(10)}}
+    lab = M.labels_for(r, plan, src)
+    rep = [e for e in lab.episodes if e.source_dataset == "robocurate/task_a_v1_scripted_replay"]
+    assert len(rep) == 10 and all(e.quality_tier == "bad" for e in rep)
+    assert sum("jitter" in e.defects for e in rep) == 5 and sum("gripper_drop" in e.defects for e in rep) == 5
+    paused = [e for e, p in zip(lab.episodes, plan, strict=True) if "pause" in p.defects and e in rep]
+    assert all("pause" in e.defects for e in paused)  # post-hoc defects are kept alongside the source's
+    hub = [e for e in lab.episodes if e.source_dataset != "robocurate/task_a_v1_scripted_replay"]
+    assert all(e.perturbation_params == "" and e.success is None for e in hub)
+
+
+def test_local_source_needs_root_for_sidecar_labels(tmp_path):
+    p = tmp_path / "r.yaml"
+    p.write_text("name: x\nrepo_id: r/x\nseed: 0\nsources: [{dataset: a/b, source: human, n_episodes: 2, "
+                 "labels: sidecar}]\n")
+    with pytest.raises(ConfigError, match="local root"):
+        M.Recipe.load(p)
 
 
 def test_task_b_v1_recipe():
@@ -67,8 +110,9 @@ def test_deferred_sources_validated(tmp_path, deferred, msg):
 def test_deferred_sources_use_disjoint_generation_seeds():
     """D-034: data-generation rollouts use generation_seed_range, never curation, eval or calibration seeds."""
     r = M.Recipe.load(REPO / "configs/mixtures/task_a_v1.yaml")
-    a = M.policy_rollout_seeds(PROTO, 10, M.deferred_seed_offset(r, "scripted_replay"))
+    a = M.policy_rollout_seeds(PROTO, 10, 0)  # the generated scripted replay (overnight 3): 700000-700009
     b = M.policy_rollout_seeds(PROTO, 100, M.deferred_seed_offset(r, "policy_rollouts"))
+    assert b[0] == 700010
     lo, hi = PROTO.generation_seed_range
     assert (lo, hi) == (700000, 799999) and not set(a) & set(b) and a[0] == lo and max(b) <= hi
     c0, c1 = PROTO.curation_seed_range

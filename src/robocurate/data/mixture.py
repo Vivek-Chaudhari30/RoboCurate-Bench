@@ -47,6 +47,13 @@ class SourceSpec:
     source: str  # scripted | human | policy
     n_episodes: int
     revision: str | None = None
+    root: str | None = None  # local LeRobot dataset (e.g. generated replay-mode episodes); env vars expanded
+    labels: str | None = None  # "sidecar": carry each episode's defects/success/perturbations from <root>.labels.json
+
+    def resolved_root(self) -> str | None:
+        import os
+
+        return os.path.expandvars(self.root) if self.root else None
 
 
 @dataclass(frozen=True)
@@ -78,7 +85,7 @@ class Recipe:
             name=d["name"],
             repo_id=d["repo_id"],
             seed=int(d["seed"]),
-            sources=tuple(SourceSpec(**s) for s in d["sources"]),
+            sources=tuple(_check_source(SourceSpec(**s), path) for s in d["sources"]),
             wrong_task_strings=tuple(d.get("wrong_task_strings", ())),
             pause=dict(dd.get("pause", {})),
             duplicate=dict(dd.get("duplicate", {})),
@@ -101,6 +108,14 @@ class Recipe:
 
 
 DEFERRED_KINDS = ("policy", "scripted_replay")
+
+
+def _check_source(s: SourceSpec, path) -> SourceSpec:
+    if s.labels not in (None, "sidecar"):
+        raise ConfigError(f"{path}: source {s.dataset}: labels must be 'sidecar' or absent")
+    if s.labels and not s.root:
+        raise ConfigError(f"{path}: source {s.dataset}: labels: sidecar needs a local root")
+    return s
 
 
 def _check_deferred(x: dict, path) -> dict:
@@ -212,16 +227,24 @@ def plan_mixture(recipe: Recipe, source_lengths: dict[str, list[int]]) -> list[E
     return out
 
 
-def labels_for(recipe: Recipe, plan: list[EpisodePlan]) -> LabelsSidecar:
-    return LabelsSidecar(
-        dataset=recipe.repo_id,
-        recipe_sha256=recipe.sha256,
-        seed=recipe.seed,
-        episodes=[
-            EpisodeLabel(p.out_index, p.source, p.source_dataset, p.source_episode, p.defects, p.quality_tier)
-            for p in plan
-        ],
-    )
+def labels_for(recipe: Recipe, plan: list[EpisodePlan],
+               source_labels: dict[str, dict[int, EpisodeLabel]] | None = None) -> LabelsSidecar:
+    """source_labels[dataset][episode]: labels of a `labels: sidecar` source; their defects (e.g. replay-mode
+    jitter / gripper_drop), success and perturbation parameters are merged with the post-hoc defects."""
+    source_labels = source_labels or {}
+    eps = []
+    for p in plan:
+        src = source_labels.get(p.source_dataset, {}).get(p.source_episode)
+        if src is None:
+            eps.append(EpisodeLabel(p.out_index, p.source, p.source_dataset, p.source_episode, p.defects,
+                                    p.quality_tier))
+            continue
+        defects = tuple(dict.fromkeys(src.defects + p.defects))
+        tier = max([DEFECT_TIER[d] for d in defects] or ["clean"], key=TIERS.index)
+        eps.append(EpisodeLabel(p.out_index, p.source, p.source_dataset, p.source_episode, defects, tier,
+                                checkpoint_step=src.checkpoint_step, success=src.success,
+                                perturbations=src.perturbations, perturbation_params=src.perturbation_params))
+    return LabelsSidecar(dataset=recipe.repo_id, recipe_sha256=recipe.sha256, seed=recipe.seed, episodes=eps)
 
 
 def plan_json(plan: list[EpisodePlan]) -> str:
@@ -268,7 +291,7 @@ def build_mixture(recipe_path: str | Path, root: str | Path | None = None, overw
     from robocurate.paths import scratch_dir
 
     recipe = Recipe.load(recipe_path)
-    metas = {s.dataset: load_metadata(s.dataset, revision=s.revision) for s in recipe.sources}
+    metas = {s.dataset: load_metadata(s.dataset, root=s.resolved_root(), revision=s.revision) for s in recipe.sources}
     plan = plan_mixture(recipe, {k: episode_lengths(m) for k, m in metas.items()})
 
     ref = metas[recipe.sources[0].dataset]
@@ -301,12 +324,15 @@ def build_mixture(recipe_path: str | Path, root: str | Path | None = None, overw
     needed: dict[str, list[int]] = {}
     for p in plan:
         needed.setdefault(p.source_dataset, []).append(p.source_episode)
+    spec_of = {s.dataset: s for s in recipe.sources}
     sources = {
-        k: load_dataset(k, episodes=sorted(set(v)), revision=next(
-            s.revision for s in recipe.sources if s.dataset == k
-        ))
+        k: load_dataset(k, root=spec_of[k].resolved_root(), episodes=sorted(set(v)), revision=spec_of[k].revision)
         for k, v in needed.items()
     }
+    from robocurate.data.labels import load_labels
+
+    source_labels = {s.dataset: load_labels(sidecar_path(s.resolved_root())).by_index()
+                     for s in recipe.sources if s.labels == "sidecar"}
     try:
         for p in plan:
             frames = _episode_frames(sources[p.source_dataset], metas[p.source_dataset], p.source_episode,
@@ -322,7 +348,7 @@ def build_mixture(recipe_path: str | Path, root: str | Path | None = None, overw
             out.save_episode()
     finally:
         out.finalize()
-    write_labels(labels_for(recipe, plan), sidecar_path(root))
+    write_labels(labels_for(recipe, plan, source_labels), sidecar_path(root))
     return root
 
 
@@ -449,12 +475,13 @@ def write_policy_dataset(episodes: list[PolicyEpisode], repo_id: str, root: str 
 
 
 def deferred_seed_offset(recipe: Recipe, name: str) -> int:
-    """Curation-seed offset of a deferred source: the episodes of the deferred sources listed before it, so two
-    GPU-phase sources never share a seed (both take seeds from generation_seed_range, D-034)."""
+    """Generation-seed offset of a deferred source (D-034): its declared `seed_offset` (used when earlier
+    data-generation sources were already generated and moved under `sources`), else the episodes of the deferred
+    sources listed before it, so two data-generation sources never share a seed."""
     off = 0
     for x in recipe.deferred_sources:
         if x["name"] == name:
-            return off
+            return int(x.get("seed_offset", off))
         off += int(x["n_episodes"])
     raise ConfigError(f"no deferred source named {name!r}")
 
