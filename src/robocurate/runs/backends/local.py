@@ -166,6 +166,11 @@ class LocalBackend:
         return None if v is None or is_tbd(v) else int(v)
 
     def eval_batch_size(self) -> int:
+        """D-035: a diffusion task's eval batch is fixed in protocol.yaml (per task) once stage d has written it;
+        otherwise the calibration config's measured value, else the task config's."""
+        pv = self.plan.protocol.task_eval_batch_size(self.plan.task.name)
+        if pv is not None and not is_tbd(pv):
+            return int(pv)
         v = self._cal_value("eval_batch_size")
         return v if v is not None else int(self.plan.task.raw("eval_batch_size"))
 

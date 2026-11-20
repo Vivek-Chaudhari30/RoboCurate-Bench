@@ -191,8 +191,9 @@ def _mock_local_backend(monkeypatch, tmp_path, kind):
     from robocurate.runs.backends import local as L
 
     protocol = types.SimpleNamespace(eval_seed_start=100000, calibration_seed_start=300000, n_eval_rollouts=200,
-                                     path=tmp_path / "p.yaml", sha256="0" * 64)
-    task = types.SimpleNamespace(env_type="aloha", env_task="AlohaTransferCube-v0", path=tmp_path / "t.yaml",
+                                     path=tmp_path / "p.yaml", sha256="0" * 64, task_eval_batch_size=lambda t: None)
+    task = types.SimpleNamespace(name="aloha_transfer_cube", env_type="aloha", env_task="AlohaTransferCube-v0",
+                                 path=tmp_path / "t.yaml",
                                  sha256="1" * 64, raw=lambda k: {"eval_batch_size": 50, "num_workers": None}[k])
     grid_vals = {"intermediate_save_freq": 500, "n_final_rollouts": 200, "n_intermediate_rollouts": 50,
                  "num_workers": 8, "batch_size": None, "eval_batch_size": None}
