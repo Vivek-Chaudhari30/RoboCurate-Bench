@@ -32,21 +32,26 @@ class PerturbActionWrapper:
         self.env, self._specs, self._seed = env, [dict(p) for p in perturbations], int(seed)
         self._pp = D.PerturbedPolicy(lambda obs: self._a, make_perturbations(tuple(dict(p) for p in self._specs)),
                                      seed=self._seed)
-        self.executed: list[np.ndarray] = []
+        self.episodes: list[list[np.ndarray]] = []  # one list per reset (vector envs autoreset at episode end)
         self._a = None
 
     def __getattr__(self, name):
         return getattr(self.env, name)
 
+    @property
+    def executed(self) -> list[np.ndarray]:
+        """Executed actions of the first episode since construction (the recorded one)."""
+        return self.episodes[0] if self.episodes else []
+
     def reset(self, *args, **kwargs):
         self._pp.reset()
-        self.executed = []
+        self.episodes.append([])
         return self.env.reset(*args, **kwargs)
 
     def step(self, action):
         self._a = np.asarray(action, dtype=float)
         a = np.asarray(self._pp(None), dtype=np.float32)
-        self.executed.append(a.copy())
+        self.episodes[-1].append(a.copy())
         return self.env.step(a)
 
 
@@ -101,9 +106,10 @@ def record(pretrained_dir: str | Path, checkpoint_step: int, env_type: str, env_
         (_, d), = make_env(env_cfg, n_envs=len(bs)).items()
         vec = d[0]
         wraps = None
-        if perturbations:
-            wraps = [PerturbActionWrapper(e, perturbations, s) for e, s in zip(vec.envs, bs, strict=True)]
-            vec.envs = wraps
+        if perturbations:  # replace the sub-envs of the innermost SyncVectorEnv (make_env may wrap the vector env)
+            inner = getattr(vec, "unwrapped", vec)
+            wraps = [PerturbActionWrapper(e, perturbations, s) for e, s in zip(inner.envs, bs, strict=True)]
+            inner.envs = wraps
         with torch.no_grad():
             r = rollout(vec, policy, env_pre, env_post, pre, post, seeds=bs, return_observations=True)
         obs = r["observation"]

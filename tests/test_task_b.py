@@ -116,5 +116,7 @@ def test_task_b_fake_end_to_end(scratch_env, tmp_path, capsys):
     assert main(["report", str(res)]) == 0
     out = capsys.readouterr().out
     assert "pusht_diffusion" in out and "oracle vs placebo" in out
+    from robocurate.runs.planner import make_plan
+
     runs = [p for p in Path(res).glob("*.json") if p.name != "leaderboard.json"]
-    assert len(runs) == 19 * 3
+    assert len(runs) == len(make_plan(str(grid), "fake").units) * 3
