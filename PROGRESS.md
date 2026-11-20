@@ -1,5 +1,108 @@
 # PROGRESS
 
+## Morning summary (CPU completion 2)
+
+Overnight 3, 2026-11-19 21:23Z to 08:40Z (about 11.3 wall-clock (the Mac appears to have slept at times; the 10 h budget ended at 07:23Z) h of the 10 h budget). Branch `m1-core`, pushed after
+every item. CPU only: no CUDA, no MPS, and rendering on the CPU Apple Software Renderer. No hokkaido, no ssh.
+GPU-h 0. Nothing published or deployed; no FROZEN, no tags. m0-calibration untouched (`0218b8c`). **main was NOT fast-forwarded**: item 11 is not fully green, because the full slow-suite rerun did not finish (B-008).
+
+**Items: 10 of 12 done, 1 incomplete, 1 skipped by rule.**
+- **Item 11 incomplete:** the full slow-suite rerun did not finish (B-008).
+- **Main fast-forward skipped:** it requires item 11 to be fully green.
+
+No item hit "same error after two different fixes".
+
+| item | commits |
+|---|---|
+| 1 decisions D-033..D-038; generation_seed_range; per-task diffusion eval_batch_size | `5285d0c` |
+| 2 `[pusht]` extra locked (one lock); LICENSE Apache-2.0 (canonical); SPDX | `43bc944` |
+| 3 scripted policy (ACT port), CPU rendering, 10 perturbed episodes, Task A v1 rebuilt | `a36b267` |
+| 4 rollout recorder with camera frames; D-033 rollout script | `50a7c11`, `0a8a549` |
+| 5 `prepare --backend local` | `ebbba96` |
+| 6 gradsim-return + per-family enablement; findings_cupid.md | `4c6690c` |
+| 7 launch kit (D-035, D-033); dry runs | `1ecad70` |
+| 8 Task B mixture check | `86173a4` |
+| 9 CuraEval comparison | `6aea84a` |
+| 10 pre-registration update (not tagged) | `6015e83` |
+| 11-12 verification, PROGRESS, this summary | `98f132a` + this commit |
+
+**Tests (final):**
+- CI default: **283 passed, 1 xfailed**, 0 skipped. The PushT env test now runs in rcb.
+- slow: **not fully verified**. The first full run gave 21 passed, 1 xfailed and 2 failed. Both failures were fixed and pass when rerun individually: the 4 recorder tests and the Task B end-to-end test (4 min). The full rerun stalled inside the Task B end-to-end's DemInf prepare (77 min, against about 5 min in every earlier run). A split rerun was still running at the budget end and was stopped. See B-008.
+- integration: **4 passed**.
+- gpu: **3 skipped**, none failed.
+- ruff: clean.
+
+**Fake end-to-end (FAKE numbers):**
+- Task A `task_a_v1`, 84 runs: oracle +0.315 (significant); entrants null; RA-BC vs 8 D-028 permutations runs.
+- Task B `pusht_diffusion_v0`, 60 runs incl. gradsim-return: oracle +0.301 (significant).
+- reproduce: MATCH 3/3 on a Task A selection cell, the Task A weighting cell and a Task B cell.
+
+**Scripted policy:**
+- *Source and license.* Ported from tonyzhaozh/act@742c753c, MIT (Copyright (c) 2023 Tony Z. Zhao), notice in the
+  file header.
+- *Equivalence.* It is action-identical to ACT's original: max |difference| 0.0 over 4,000 steps.
+- *Simulator finding.* ACT's own code succeeds 5/5 under its pinned mujoco 2.3.3 and 0/5 under the benchmark's
+  mujoco 3.8.1. So generation is two-stage, as ACT's procedure is:
+  - the end-effector stage runs under mujoco 2.3.3 (a scratch env outside the lock);
+  - replay and recording run in gym-aloha 0.1.5 / mujoco 3.8.1.
+- *Success.* **20/20 = 1.00** on generation seeds 790000-790019. The replay tracks the scripted gripper path with a
+  median of at most 3.9 mm and a p95 of at most 1.5 cm.
+
+**10 perturbed episodes:**
+- 5 jitter and 5 failed grasps, all 10 failing (bad tier), on generation seeds 700000-700009.
+- Recorded with camera frames in LeRobot format. Labels give source, perturbation type and parameters, and success.
+- Jitter σ = 0.643 per D-037: it matches the community median HF share among jittery episodes, 0.3856 (22
+  episodes, all in kmg0620).
+- The Task A v1 CPU part was rebuilt as 40 Hub scripted + 10 perturbed + 50 human. validate-defects against the
+  community:
+  - interior pause rate 0.50 (community median 0.50);
+  - pause p50 0.92 s (community 0.62-1.20 s);
+  - 0 exact duplicates;
+  - jittered episodes' HF share 0.33-0.38, median 0.352 vs the 0.386 target, because injected pauses lower it on 4
+    of the 5;
+  - 8 near-duplicate pairs, from scripted trajectories (the community has 0).
+
+**gradsim-return (D-036):** CUPID's return-weighted objective with plain gradient similarity (TracIn), no knobs.
+- Toybed AUROC **1.000 on diffusion**: enabled for diffusion and added to the Task B grid.
+- Toybed AUROC **0.383 on the ACT-style toybed**: not enabled for ACT.
+
+CUPID stays disabled; the evidence is in docs/findings_cupid.md.
+
+**CuraEval headline:**
+- *Shared core controls:* run as the unit of analysis, size-matched random subsets, full-data reference, Holm, 200
+  rollouts.
+- *Stricter here:* K >= 8 placebo subsets with a balanced test that models subset variance, final checkpoint only,
+  frozen disjoint seed blocks, a written pre-registration.
+- *CuraEval covers what we do not:* real mixed-skill operators, robomimic tasks, BC-RNN, and analyses of what scores
+  measure (docs/related_work.md).
+
+**Dependencies and lock:**
+- One `requirements.lock` now includes the `[pusht]` extra: gym-pusht 0.1.8, pymunk 6.11.1, diffusers 0.39.0, and
+  opencv-python 4.13.0.92, pinned to the locked headless version (the venv had 4.14.0.94).
+- 11 additions and 0 changed pins; `pip check` clean; LICENSE canonical (sha256 cfc7749b…).
+- Generation-only scratch env (outside the lock): `$ROBOCURATE_SCRATCH/venvs/mj233`, with python 3.11, mujoco 2.3.3,
+  dm_control 1.0.9 and gym-aloha 0.1.5.
+
+**Decisions needed from Vivek:**
+1. Review and tag `prereg-v1`.
+2. Accept the two-stage scripted generation. Its end-effector stage depends on ACT's old simulator (mujoco 2.3.3,
+   outside the lock). The alternative is waiting for a fix that makes the mocap stage work under mujoco 3.x.
+3. Jitter σ 0.643 makes every jittered episode fail. Keep it (D-037 as written), or decide whether replay-perturbed
+   episodes should be excluded from post-hoc pauses (pauses lower their HF share to 0.35)?
+4. Real-task adapters are still needed before demo_score (both tasks) and gradsim-return (Task B) can run in the
+   GPU phase. They must expose a LeRobot ACT/Diffusion checkpoint through the entrants' interface: `loss`/`act`; for
+   diffusion, `denoiser`/`make_samples`.
+5. GPU-host rendering for any re-generation: egl uses the GPU; osmesa is CPU on Linux.
+6. Approve the Task B mixture (proposal, unchanged in substance).
+
+**First GPU step** (docs/runbook_gpu.md section 6), on hokkaido:
+1. `mkdir -p /share/datasets/robocurate && df -h /share/datasets/robocurate`.
+2. Set ROBOCURATE_SCRATCH in `scripts/env.sh` and enable the GPU there, once allowed.
+3. `tmux new -s rcb-m0`.
+4. `source scripts/env.sh && scripts/m0_pipeline.sh --task a`.
+
+
 ## CPU completion 2 log (overnight 3, branch m1-core, CPU only, no MPS, no hokkaido; GPU-h 0)
 
 Start 2026-11-19T21:23Z (`caffeinate -dims -t 43200`). huggingface.co unreachable at start (HTTP 000; B-007 again);
@@ -18,7 +121,99 @@ retried later, items that need the Hub continue when it is back.
 | 2026-11-20T03:24Z | 8 Task B mixture | checked vs D-031/D-037: no deviation (comments + explicit seed offset) | test_mixture_v1 | done |
 | 2026-11-20T03:24Z | 9 CuraEval | docs/related_work.md + README summary | n/a | done |
 | 2026-11-20T03:24Z | 10 prereg | updated for D-033..D-038, not tagged, deviations log empty | n/a | done |
+| 2026-11-20T10:14Z | 11-12 verification + summary | default 283 passed + 1 xfailed; integration 4; gpu 3 skipped; ruff clean; fake e2e both tasks + reproduce MATCH; slow: first run 2 failures fixed (rerun individually green), full rerun stalled (B-008); budget exceeded at 07:23Z | see Final verification (overnight 3) | main NOT fast-forwarded (item 11 not fully green); morning summary on top |
 <!-- cpu2-log -->
+
+## Final verification (overnight 3, item 11)
+
+| suite | result |
+|---|---|
+| CI default (`not gpu and not slow and not integration`) | **283 passed, 1 xfailed**: CUPID on the MLP toybed, strict; 0 skipped, so the PushT env test now runs |
+| slow | **not fully verified**. The first full run gave 21 passed, 1 xfailed and 2 failed. Both failures were fixed and pass when rerun individually: the 4 recorder tests and the Task B end-to-end test (4 min). The full rerun stalled inside the Task B end-to-end's DemInf prepare (77 min, against about 5 min in every earlier run). A split rerun was still running at the budget end and was stopped. See B-008. |
+| integration | **4 passed** (Hub reachable) |
+| gpu | **3 skipped** (no CUDA), none failed |
+| ruff | clean |
+
+The first full slow run had 21 passed, 1 xfailed and 2 failed. Both failures were fixed, with regression coverage,
+in commit "sim: recorder logs executed actions per episode":
+- the rollout recorder lost its executed-action log when the vector env autoreset a sub-env at episode end;
+- the Task B end-to-end test hard-coded 19 cells, but the grid now has 20 (gradsim-return).
+
+Fake end-to-end on the launch grids (FAKE numbers): Task A `task_a_v1` (84 runs incl. RA-BC vs 8 D-028
+permutations) and Task B `pusht_diffusion_v0` (60 runs incl. gradsim-return).
+
+```text
+===== Task a: configs/grids/task_a_v1.yaml
+rabc v1 [weighting] budget 1.0: progress + 8 D-028 placebo progress parquets; cached in 0.03s, GPU-h 0.000, rollouts 0
+length_heuristic v1 [selection] budget 0.5: 25 episodes; cached in 0.00s, GPU-h 0.000, rollouts 0
+lerobot_doctor v1 [selection] budget 0.5: 25 episodes; cached in 0.08s, GPU-h 0.000, rollouts 0
+kinema v1 [selection] budget 0.5: 25 episodes; cached in 0.19s, GPU-h 0.000, rollouts 0
+roboaudit v1 [selection] budget 0.5: 25 episodes; cached in 0.45s, GPU-h 0.000, rollouts 0
+rda v1 [selection] budget 0.5: 25 episodes; cached in 0.29s, GPU-h 0.000, rollouts 0
+robometer_filter v1 [selection] budget 0.5: 25 episodes; cached in 0.00s, GPU-h 0.000, rollouts 0
+rcb_score v1 [selection] budget 0.5: 25 episodes; cached in 0.01s, GPU-h 0.000, rollouts 0
+demo_score v1 [selection] budget 0.5: 25 episodes; cached in 4.01s, GPU-h 0.000, rollouts 100
+deminf v1 [selection] budget 0.5: 25 episodes; cached in 266.69s, GPU-h 0.000, rollouts 0
+84 runs -> $SCRATCHPAD/e2e3/res_a
+done=84 skipped_existing=0 skipped_locked=0 reclaimed_stale_locks=0
+*** FAKE RESULTS (synthetic backend) ***
+task aloha_transfer_cube budget 0.5 (selection):
+  cleaner:lerobot_doctor vs placebo [D-026]: diff=+0.018 SE=0.026 df=7 p_holm=1 not significant   (Welch secondary p_holm=1)
+  cleaner:kinema vs placebo [D-026]: diff=-0.009 SE=0.026 df=7 p_holm=1 not significant   (Welch secondary p_holm=1)
+  cleaner:rcb_score vs placebo [D-026]: diff=+0.003 SE=0.026 df=7 p_holm=1 not significant   (Welch secondary p_holm=1)
+  cleaner:deminf vs placebo [D-026]: diff=+0.013 SE=0.026 df=7 p_holm=1 not significant   (Welch secondary p_holm=1)
+  cleaner:demo_score vs placebo [D-026]: diff=+0.001 SE=0.026 df=7 p_holm=1 not significant   (Welch secondary p_holm=1)
+  cleaner:rda vs placebo [D-026]: diff=-0.002 SE=0.026 df=7 p_holm=1 not significant   (Welch secondary p_holm=1)
+  cleaner:roboaudit vs placebo [D-026]: diff=-0.057 SE=0.026 df=7 p_holm=0.564 not significant   (Welch secondary p_holm=0.0898)
+  cleaner:length_heuristic vs placebo [D-026]: diff=-0.000 SE=0.026 df=7 p_holm=1 not significant   (Welch secondary p_holm=1)
+  cleaner:robometer_filter vs placebo [D-026]: diff=-0.005 SE=0.026 df=7 p_holm=1 not significant   (Welch secondary p_holm=1)
+  [ref] oracle vs placebo: diff=+0.315 p=5.56e-06 SIGNIFICANT
+  [ref] full vs placebo: diff=-0.027 p=0.546 not significant
+  s_sub=0.000 (truncated) s_seed=0.069 K=8 n_p=3 n_c=3  MDE (80% power): 0.129
+task aloha_transfer_cube full data (weighting):
+  weighting:rabc vs placebo [D-026]: diff=+0.005 SE=0.035 df=7 p_holm=0.895 not significant   (Welch secondary p_holm=0.917)
+  [ref] full vs placebo: diff=-0.027 p=0.479 not significant
+  s_sub=0.000 (truncated) s_seed=0.059 K=8 n_p=3 n_c=3  MDE (80% power): 0.115
+===== Task b: configs/grids/pusht_diffusion_v0.yaml
+length_heuristic v1 [selection] budget 0.5: 25 episodes; computed in 0.00s, GPU-h 0.000, rollouts 0
+lerobot_doctor v1 [selection] budget 0.5: 25 episodes; computed in 0.06s, GPU-h 0.000, rollouts 0
+kinema v1 [selection] budget 0.5: 25 episodes; computed in 0.17s, GPU-h 0.000, rollouts 0
+roboaudit v1 [selection] budget 0.5: 25 episodes; computed in 0.48s, GPU-h 0.000, rollouts 0
+rda v1 [selection] budget 0.5: 25 episodes; computed in 0.29s, GPU-h 0.000, rollouts 0
+robometer_filter v1 [selection] budget 0.5: 25 episodes; computed in 0.00s, GPU-h 0.000, rollouts 0
+rcb_score v1 [selection] budget 0.5: 25 episodes; computed in 0.00s, GPU-h 0.000, rollouts 0
+demo_score v1 [selection] budget 0.5: 25 episodes; computed in 4.03s, GPU-h 0.000, rollouts 100
+deminf v1 [selection] budget 0.5: 25 episodes; computed in 295.97s, GPU-h 0.000, rollouts 0
+gradsim_return v1 [selection] budget 0.5: 25 episodes; computed in 0.29s, GPU-h 0.000, rollouts 100
+60 runs -> $SCRATCHPAD/e2e3/res_b
+done=60 skipped_existing=0 skipped_locked=0 reclaimed_stale_locks=0
+*** FAKE RESULTS (synthetic backend) ***
+task pusht_diffusion budget 0.5 (selection):
+  cleaner:roboaudit vs placebo [D-026]: diff=-0.012 SE=0.046 df=7 p_holm=1 not significant   (Welch secondary p_holm=1)
+  cleaner:rcb_score vs placebo [D-026]: diff=-0.052 SE=0.046 df=7 p_holm=1 not significant   (Welch secondary p_holm=1)
+  cleaner:gradsim_return vs placebo [D-026]: diff=-0.008 SE=0.046 df=7 p_holm=1 not significant   (Welch secondary p_holm=1)
+  cleaner:length_heuristic vs placebo [D-026]: diff=+0.011 SE=0.046 df=7 p_holm=1 not significant   (Welch secondary p_holm=1)
+  cleaner:kinema vs placebo [D-026]: diff=-0.044 SE=0.046 df=7 p_holm=1 not significant   (Welch secondary p_holm=1)
+  cleaner:rda vs placebo [D-026]: diff=-0.052 SE=0.046 df=7 p_holm=1 not significant   (Welch secondary p_holm=0.0522)
+  cleaner:deminf vs placebo [D-026]: diff=-0.031 SE=0.046 df=7 p_holm=1 not significant   (Welch secondary p_holm=1)
+  cleaner:demo_score vs placebo [D-026]: diff=+0.014 SE=0.046 df=7 p_holm=1 not significant   (Welch secondary p_holm=1)
+  cleaner:robometer_filter vs placebo [D-026]: diff=-0.029 SE=0.046 df=7 p_holm=1 not significant   (Welch secondary p_holm=1)
+  cleaner:lerobot_doctor vs placebo [D-026]: diff=-0.041 SE=0.046 df=7 p_holm=1 not significant   (Welch secondary p_holm=1)
+  [ref] oracle vs placebo: diff=+0.301 p=0.000325 SIGNIFICANT
+  [ref] full vs placebo: diff=-0.031 p=0.511 not significant
+  s_sub=0.012 s_seed=0.072 K=8 n_p=3 n_c=3  MDE (80% power): 0.235
+```
+
+reproduce (one Task A selection cell, the Task A weighting cell, one Task B cell):
+
+```text
+cell 186cc0bd36cb: task aloha_transfer_cube budget 0.5 condition {'kind': 'cleaner', 'name': 'length_heuristic', 'version': '1'} (3 runs, kind fake)
+re-executed: MATCH 3/3
+cell a03b0f077b04: task aloha_transfer_cube budget 1.0 condition {'kind': 'weighting', 'name': 'rabc', 'version': '1'} (3 runs, kind fake)
+re-executed: MATCH 3/3
+cell 6a064fb26beb: task pusht_diffusion budget 0.5 condition {'kind': 'cleaner', 'name': 'gradsim_return', 'version': '1'} (3 runs, kind fake)
+re-executed: MATCH 3/3
+```
 
 ## CPU completion 2 details (overnight 3)
 
@@ -1189,6 +1384,21 @@ Timebox 4 h; used ~1 h. CPU only. Nothing about the entrant was tuned; the toybe
 - Scripts: scratchpad `diff_premise.py`, `diff_cupid.py`, `diff_diag.py` (not committed; numbers above).
 
 ## Blocked
+
+- **B-008 (2026-11-20T05:45Z, OPEN) — the full slow suite stalls in the Task B fake end-to-end after the recorder tests.**
+  - *Symptom.* In the full slow run, `test_task_b_fake_end_to_end` sat in DemInf's prepare for 77+ min at about
+    27% CPU. That step took about 5 min in every earlier run (standalone runs and the first full run).
+  - *Context.* The first full slow run, where the recorder perturbation test failed early, completed in 22.5 min.
+    After the recorder fix (the perturbation test now runs a full LeRobot rollout on the CPU software renderer), the
+    stall appeared.
+  - *What passed.* Each affected test passes alone: recorder 4/4, Task B end-to-end 1/1 in 4 min, and the default
+    suite.
+  - *Hypothesis.* Thread or OpenMP state left behind by the LeRobot rollout or the CGL context, which slows the later
+    torch training in DemInf.
+  - *Attempt.* A split rerun (recorder tests in their own process) was still running at the budget end (Mac sleep
+    suspected) and was stopped.
+  - *What would resolve it.* Run `pytest -m slow --deselect tests/test_rollout_recorder.py`, then the recorder
+    tests alone. If both are green, consider running the recorder tests in a subprocess.
 
 - **B-007 (2026-11-19T18:35Z; RESOLVED 19:18Z, the Hub is reachable again; integration 4 passed, environment) — huggingface.co unreachable from this Mac: TLS "self-signed
   certificate in certificate chain".**
