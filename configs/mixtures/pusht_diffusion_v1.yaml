@@ -1,7 +1,9 @@
 # Task B mixture recipe v1 (D-030; same rules as D-031 where they apply). PROPOSAL until Vivek reviews it; it
 # freezes with eval-v1 and may change only before any entrant result exists.
 # Total planned: 306 episodes = 206 human (all of lerobot/pusht) + 100 policy rollouts (GPU phase).
-# No scripted source exists for PushT (docs/task_b_readiness.md), so there are no replay-mode perturbations.
+# No scripted source exists for PushT (docs/task_b_readiness.md). D-031's replay-mode perturbations target scripted
+# episodes, so none are used here; if they were added later, D-037 would require them on policy rollouts only, with
+# sigma matched to the community jittery-episode median (checked overnight 3, item 8).
 name: pusht_diffusion_v1
 repo_id: robocurate/task_b_v1
 seed: 30                                   # recipe seed: episode order shuffled by it (D-021)
@@ -16,7 +18,8 @@ defects:
 deferred_sources:
   - name: policy_rollouts
     source: policy
-    generated_in: gpu_phase                # full-data diffusion checkpoints of the M0 Task B seed-1000 run
+    generated_in: gpu_phase                # D-033: M0 Task B full-data seed-1000 checkpoints at 10/30/60/100% of S
+    seed_offset: 0                         # D-034: generation seeds 700000-700099 (Task B's own env)
     n_episodes: 100
     checkpoints:
       - {train_fraction: 0.10, n_episodes: 25}
