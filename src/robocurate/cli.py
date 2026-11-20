@@ -69,9 +69,28 @@ def cmd_prepare(args) -> int:
     if args.backend == "fake":
         view = P.fake_view(plan.protocol)
         factory = P.fake_context_factory(plan.protocol, view, out)
-    else:
-        raise ConfigError("prepare --backend local needs the mixture dataset, Robometer weights and (for "
-                          "reference-policy entrants) the M0 full-data checkpoint; not available in this milestone")
+    else:  # real mixture dataset; resources the entrants declare are injected (D-022)
+        from robocurate.data.hub import load_view
+        from robocurate.paths import scratch_dir
+
+        root = Path(args.dataset_root) if args.dataset_root else scratch_dir("datasets", create=False) / \
+            plan.task.train_dataset
+        view = load_view(plan.task.train_dataset, root, plan.protocol.tie_break_salt or "")
+        progress = None
+        if args.robometer_model:  # pragma: no cover - GPU phase
+            from robocurate.curation.progress import RobometerProgress
+
+            progress = RobometerProgress(plan.task.train_dataset, args.robometer_model, args.robometer_revision,
+                                         out / "_robometer" / "progress.parquet", device=args.device)
+        rollouts = None
+        if args.reference_policy:  # pragma: no cover - GPU phase (LeRobot checkpoint + sim)
+            from robocurate.curation.rollouts import LeRobotRolloutBackend
+
+            rollouts = LeRobotRolloutBackend(plan.task.env_type, plan.task.env_task, device=args.device)
+        res = P.LocalResources(root, device=args.device, progress_model=progress, rollout_backend=rollouts,
+                               reference_policy_path=args.reference_policy,
+                               reference_loader=(lambda p: str(p)) if args.reference_policy else None)
+        factory = P.local_context_factory(plan.protocol, res, out)
     only = set(args.only.split(",")) if args.only else None
     recs = P.prepare_plan(plan, view, out, args.backend, factory, replicate=args.replicate, only=only)
     for r in recs:
@@ -266,6 +285,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--backend", choices=["fake", "local"], required=True)
     p.add_argument("--selections-dir", help="default: $ROBOCURATE_SCRATCH/selections/<grid>-<backend>")
     p.add_argument("--only", help="comma-separated entrant names to prepare (default: every entrant in the grid)")
+    p.add_argument("--dataset-root", help="local: the built mixture (default $ROBOCURATE_SCRATCH/datasets/<repo_id>)")
+    p.add_argument("--device", default="cpu", help="local: device for GPU entrants (cuda in the GPU phase)")
+    p.add_argument("--robometer-model", help="local: Robometer reward-model path (GPU phase)")
+    p.add_argument("--robometer-revision", default="main", help="local: Robometer model revision")
+    p.add_argument("--reference-policy", help="local: M0 full-data seed-1000 checkpoint (pretrained_model dir)")
     p.add_argument("--replicate", type=int, default=0, help="mixture replicate index")
     p.set_defaults(fn=cmd_prepare)
 

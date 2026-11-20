@@ -147,6 +147,44 @@ def fake_context_factory(protocol: Any, view: DatasetView, cache_dir: Path) -> C
     return make
 
 
+class LocalResources:
+    """What the local prepare stage can hand an entrant (D-022). Anything an entrant declares but is missing here
+    refuses with a PrepareError naming it. The GPU phase injects the real objects (Robometer progress, a LeRobot
+    rollout backend, the M0 reference checkpoint); tests inject tiny or mocked ones on CPU."""
+
+    def __init__(self, dataset_root: str | Path, device: str = "cpu", progress_model: Any = None,
+                 rollout_backend: Any = None, reference_policy_path: str | Path | None = None,
+                 reference_loader: Callable[[Path], Any] | None = None):
+        self.dataset_root, self.device = Path(dataset_root), device
+        self.progress_model, self.rollout_backend = progress_model, rollout_backend
+        self.reference_policy_path, self.reference_loader = reference_policy_path, reference_loader
+
+
+def local_context_factory(protocol: Any, res: LocalResources, cache_dir: str | Path
+                          ) -> Callable[[Cleaner], CurationContext]:
+    cache_dir = Path(cache_dir)
+
+    def make(cleaner: Cleaner) -> CurationContext:
+        ctx = CurationContext(backend="local", device=res.device)
+        if getattr(cleaner, "requires_dataset_root", False):
+            ctx.dataset_root = res.dataset_root
+        if cleaner.requires_gpu:  # Robometer-based entrants (robometer_filter, rcb_score, rabc)
+            if res.progress_model is None:
+                raise PrepareError(f"{cleaner.name} needs a progress model (Robometer in the GPU phase)")
+            ctx.progress_model = CachedProgress(res.progress_model, cache_dir)
+        if cleaner.requires_rollouts:
+            if res.rollout_backend is None:
+                raise PrepareError(f"{cleaner.name} needs a rollout backend (curation seeds, D-007)")
+            ctx.rollouts = RolloutService.from_protocol(protocol, res.rollout_backend, cap=cleaner.requires_rollouts)
+        if cleaner.requires_reference_policy:
+            if res.reference_policy_path is None or res.reference_loader is None:
+                raise PrepareError(f"{cleaner.name} needs the reference policy (M0 full-data seed-1000 checkpoint)")
+            ctx.reference_policy = ReferencePolicy(res.reference_policy_path, res.reference_loader)
+        return ctx
+
+    return make
+
+
 def _inputs(cell: Cell, cleaner: Cleaner, view: DatasetView, protocol: Any, ctx: CurationContext,
             rabc_chunk_size: int | None = None) -> dict[str, Any]:
     return {
@@ -174,8 +212,10 @@ def prepare_cell(cell: Cell, cleaner: Cleaner, view: DatasetView, protocol: Any,
         raise PrepareError(f"{cleaner.name}: invalid resource declaration: {problems}")
     if (cell.kind == "weighting") != isinstance(cleaner, WeightingCleaner):
         raise PrepareError(f"{cleaner.name}: grid kind {cell.kind!r} does not match the entrant's track")
-    if cleaner.requires_gpu and backend == "local" and not os.environ.get("CUDA_VISIBLE_DEVICES", "").strip():
-        # same rule as runs.backends.local.require_gpu_env, without importing runs/ (import-graph rule)
+    if (cleaner.requires_gpu and backend == "local" and ctx.device != "cpu"
+            and not os.environ.get("CUDA_VISIBLE_DEVICES", "").strip()):
+        # same rule as runs.backends.local.require_gpu_env, without importing runs/ (import-graph rule); an explicit
+        # device="cpu" (tests with tiny/mocked models) never touches a GPU
         raise PrepareError(f"{cleaner.name} requires a GPU; CUDA_VISIBLE_DEVICES is empty (GPU use not authorized)")
     cache_dir = Path(cache_dir)
     out = cache_dir / cell.relpath()
