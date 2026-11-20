@@ -43,7 +43,7 @@ def test_task_b_grid_lists_every_enabled_selection_entrant():
     g = load_grid(REPO / "configs/grids/pusht_diffusion_v0.yaml")
     listed = {c.name for c in g.condition_specs() if c.kind == "cleaner"}
     enabled = {n for n in registry.available() if registry.get(n).track == "selection"
-               and registry.disabled_reason(n) is None and n != "random_subset"}  # random_subset = the placebo
+               and registry.disabled_reason(n, "diffusion") is None and n != "random_subset"}  # random_subset = placebo
     assert listed == enabled
 
 

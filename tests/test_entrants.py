@@ -416,3 +416,45 @@ def test_sanity_cupid_diffusion(diffusion_toy):
     cl.select(view, view.n_episodes // 2, np.random.default_rng(0))
     assert cl.diagnostics["family"] == "diffusion" and cl.diagnostics["n_rollouts"] == 100
     assert _auroc_low(cl._psi, labels) >= 0.8
+
+
+# ------------------------------------------------------------------ gradsim-return (D-036), both toybeds
+
+
+def _gradsim_auroc(view, labels, ref, loader):
+    cl = registry.get("gradsim_return")
+    cl.context = CurationContext(
+        rollouts=RolloutService.from_protocol(PROTO, GymRolloutBackend(PointReachEnv), cap=cl.requires_rollouts),
+        reference_policy=ReferencePolicy(ref, loader))
+    cl.select(view, view.n_episodes // 2, np.random.default_rng(0))
+    assert cl.diagnostics["n_rollouts"] == 100
+    return _auroc_low(cl._psi, labels), cl.diagnostics
+
+
+def test_gradsim_return_has_no_tunable_parameters_and_credits():
+    from robocurate.cleaners.entrants import gradsim_return as G
+
+    c = registry.get("gradsim_return")
+    assert c.implementation == "original" and "2506.19121" in c.source and "2002.08484" in c.source
+    assert {n for n in dir(G) if n.isupper()} == {"CHUNK", "N_ROLLOUTS"}  # batching + CUPID m=100; no lambda / d
+    assert not hasattr(G, "LAMBDA_REG") and not hasattr(G, "PROJ_DIM")
+
+
+def test_gradsim_return_toybed_mlp(toy):
+    """ACT-style unimodal (MLP) toybed: report the AUROC; enablement follows it (D-036)."""
+    view, labels, ref = toy
+    auc, diag = _gradsim_auroc(view, labels, ref, MLPPolicy.load)
+    assert diag["family"] == "unimodal"
+    fams = registry.get("gradsim_return").enabled_policy_families
+    assert ("act" in fams) == (auc >= 0.8), (auc, fams)
+
+
+@pytest.mark.slow
+def test_gradsim_return_toybed_diffusion(diffusion_toy):
+    from toybed.diffusion import ToyDiffusionPolicy
+
+    view, labels, ref = diffusion_toy
+    auc, diag = _gradsim_auroc(view, labels, ref, ToyDiffusionPolicy.load)
+    assert diag["family"] == "diffusion"
+    fams = registry.get("gradsim_return").enabled_policy_families
+    assert ("diffusion" in fams) == (auc >= 0.8), (auc, fams)

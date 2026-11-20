@@ -63,9 +63,10 @@ class _LossWrap(nn.Module):
         return self.p.loss(batch)
 
 
-def per_sample_projected_grads(policy: nn.Module, states: np.ndarray, actions: np.ndarray, P: torch.Tensor
+def per_sample_projected_grads(policy: nn.Module, states: np.ndarray, actions: np.ndarray, P: torch.Tensor | None
                                ) -> torch.Tensor:
-    """(N, d): random projections of per-sample loss gradients (torch.func vmap over samples)."""
+    """(N, d): random projections of per-sample loss gradients (torch.func vmap over samples); P=None returns the
+    full flattened gradients (N, n_params)."""
     wrap = _LossWrap(policy).eval()
     params = {k: v.detach() for k, v in wrap.named_parameters()}
 
@@ -79,8 +80,8 @@ def per_sample_projected_grads(policy: nn.Module, states: np.ndarray, actions: n
     for i in range(0, len(S), CHUNK):
         gi = g(params, S[i:i + CHUNK], A[i:i + CHUNK])
         flat = torch.cat([gi[k].reshape(len(S[i:i + CHUNK]), -1) for k in params], dim=1)
-        out.append(flat @ P)
-    return torch.cat(out) if out else torch.zeros(0, P.shape[1])
+        out.append(flat if P is None else flat @ P)
+    return torch.cat(out) if out else torch.zeros(0, 0 if P is None else P.shape[1])
 
 
 def performance_influence(train_feats: torch.Tensor, target_sum: torch.Tensor, H: torch.Tensor) -> torch.Tensor:
@@ -94,7 +95,7 @@ def _projection(n_params: int, seed: int) -> torch.Tensor:
     return torch.randn(n_params, PROJ_DIM, generator=torch.Generator().manual_seed(seed)) / PROJ_DIM**0.5
 
 
-def diffusion_square_features(policy, obs: torch.Tensor, chunks: torch.Tensor, P: torch.Tensor,
+def diffusion_square_features(policy, obs: torch.Tensor, chunks: torch.Tensor, P: torch.Tensor | None,
                               gen: torch.Generator) -> torch.Tensor:
     """(N, d): projected per-sample gradients of the official "square" output, averaged over NUM_TIMESTEPS random
     timesteps with fresh noise (modelout_functions.py:79-119; gradient_computers.py:110-128)."""
@@ -115,8 +116,9 @@ def diffusion_square_features(policy, obs: torch.Tensor, chunks: torch.Tensor, P
         ts = torch.randint(0, int(policy.num_train_timesteps), (len(o), NUM_TIMESTEPS), generator=gen)
         nz = torch.randn((len(o), NUM_TIMESTEPS, *c.shape[1:]), generator=gen)
         gi = g(params, o, c, ts, nz)
-        out.append(torch.cat([gi[k].reshape(len(o), -1) for k in params], dim=1) @ P)
-    return torch.cat(out) if out else torch.zeros(0, P.shape[1])
+        flat = torch.cat([gi[k].reshape(len(o), -1) for k in params], dim=1)
+        out.append(flat if P is None else flat @ P)
+    return torch.cat(out) if out else torch.zeros(0, 0 if P is None else P.shape[1])
 
 
 def cupid_diffusion_scores(policy, view: DatasetView, rollouts, seed: int) -> tuple[dict[int, float], dict]:
