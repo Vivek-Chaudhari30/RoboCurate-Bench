@@ -74,9 +74,10 @@ pipeline stops by design, and Vivek decides (for example, fix the eval batch siz
    from the top of the range, with a separate offset per deferred source.
    - Sources are the M0 seed-1000 full-data checkpoints at 10/30/60/100% of S.
    - **Not built yet:** an adapter from a LeRobot checkpoint to an `obs -> action` callable that also records the
-     camera frames the ACT/Diffusion mixtures need. A scripted transfer-cube policy is also missing (gym-aloha
-     0.1.5 and lerobot 0.6.1 ship none). Until both exist, `--backend local` refuses with this list. The fake
-     backend exercises seeds, labels and the LeRobot writer.
+     camera frames the ACT/Diffusion mixtures need. `write_policy_dataset` stores `observation.state` and
+     `action` only. The scripted transfer policy is implemented for state-only replay
+     (`src/robocurate/data/scripted_transfer.py`). Image episodes are blocked on the camera writer, so
+     `--backend local` still refuses. The fake backend exercises seeds, labels and the LeRobot writer.
    - GPU-h ≈ (110 / 200) × eval_h_per_200 (Task A) and (100 / 200) × eval_h_per_200 (Task B).
 2. **Build the mixtures.** Move each deferred source under `sources:` of its recipe, then run
    `build_mixture(...)`. Post-hoc pause rates then apply to all episodes. Run `robocurate validate-defects` on the
