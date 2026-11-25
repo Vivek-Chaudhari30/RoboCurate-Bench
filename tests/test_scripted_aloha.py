@@ -41,7 +41,53 @@ def test_policy_waypoints_follow_act():
     np.testing.assert_allclose(acts[220, 8:11], SA.MEET_XYZ)
 
 
+def _egl_display_missing(exc: BaseException) -> bool:
+    """True only for dm_control's missing-EGL import failure.
+
+    CI sets MUJOCO_GL=egl (dm_control/_render/__init__.py:21-22, 73-90). With no EGL display the import
+    dies in PyOpenGL (`'NoneType' object has no attribute 'eglQueryString'`) or, once libEGL loads, in
+    dm_control/_render/pyopengl/egl_renderer.py:74-75 (`Cannot initialize a headless EGL display`).
+    """
+    pending, seen = [exc], set()
+    while pending:
+        cur = pending.pop()
+        if id(cur) in seen:
+            continue
+        seen.add(id(cur))
+        msg = str(cur)
+        if "eglQueryString" in msg or "Cannot initialize a headless EGL display" in msg:
+            return True
+        if cur.__cause__ is not None:
+            pending.append(cur.__cause__)
+        if cur.__context__ is not None and cur.__context__ is not cur.__cause__:
+            pending.append(cur.__context__)
+    return False
+
+
+def _skip_if_egl_backend_unavailable() -> None:
+    """Skip when MUJOCO_GL=egl cannot create a display. Any other backend, and a working EGL import, run on."""
+    if os.environ.get("MUJOCO_GL", "").lower() != "egl":
+        return
+    try:
+        from dm_control import _render  # noqa: F401  reads MUJOCO_GL and imports that backend
+    except Exception as exc:
+        if _egl_display_missing(exc):
+            pytest.skip(f"MUJOCO_GL=egl backend failed to initialize: {exc}")
+        raise
+
+
+def test_egl_display_missing_matches_the_runner_failure_only():
+    assert _egl_display_missing(AttributeError("'NoneType' object has no attribute 'eglQueryString'"))
+    assert _egl_display_missing(ImportError("Cannot initialize a headless EGL display."))
+    wrapped = RuntimeError("dm_control import")
+    wrapped.__cause__ = AttributeError("'NoneType' object has no attribute 'eglQueryString'")
+    assert _egl_display_missing(wrapped)
+    assert not _egl_display_missing(AttributeError("'NoneType' object has no attribute 'joint_traj'"))
+    assert not _egl_display_missing(AssertionError("joint trajectories differ"))
+
+
 def test_ee_stage_is_deterministic_per_seed_and_uses_the_seeded_pose():
+    _skip_if_egl_backend_unavailable()
     from gym_aloha.utils import sample_box_pose
 
     a, b, c = SA.rollout_ee(700000), SA.rollout_ee(700000), SA.rollout_ee(700001)
