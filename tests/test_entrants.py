@@ -148,19 +148,45 @@ def test_cupid_per_sample_grads_match_autograd():
 
 
 def test_cupid_influence_sign_on_linear_toy():
-    """A demo whose gradient points the way successful rollouts' gradients point gets positive influence."""
+    """A demo whose gradient points the way successful rollouts' gradients point gets positive influence.
+
+    The old fixture was MLPPolicy(1, 1, hidden=4) on 30 linspace states (33 parameters). A 1-D input only
+    excites a few of those directions, so phi.T @ phi had condition number ~3.2e11. torch.linalg.pinv of
+    that matrix flipped the comparison across BLAS: one runner got tensor(13.0770) > tensor(33.3154) and
+    failed, another passed. This fixture is a linear map on a centered full-rank design. Good actions are
+    the first state coordinate, bad actions are its negation, and the rollout target matches the good
+    actions. The gram-matrix condition number stays small, so the inequality is the influence sign.
+    """
     from robocurate.cleaners.entrants.cupid import per_sample_projected_grads
 
-    pol = MLPPolicy(1, 1, hidden=4, seed=3)
-    n = sum(p.numel() for p in pol.parameters())
-    P = torch.eye(n)
-    S = np.linspace(-1, 1, 30, dtype=np.float32)[:, None]
-    good, bad = S.copy(), -S.copy()  # 'good' demos act a = s, 'bad' act a = -s
-    phi = per_sample_projected_grads(pol, np.concatenate([S, S]), np.concatenate([good, bad]), P)
-    Hinv = torch.linalg.pinv((phi.T @ phi).double()).float()
-    u = per_sample_projected_grads(pol, S, good, P).sum(0)  # successful rollouts behaved like 'good'
-    infl = phi @ (Hinv @ u)
-    assert infl[:30].sum() > infl[30:].sum()
+    class _LinearToy(torch.nn.Module):
+        def __init__(self) -> None:
+            super().__init__()
+            g = torch.Generator().manual_seed(0)
+            self.w = torch.nn.Parameter(torch.randn(4, generator=g) * 0.05)
+            self.b = torch.nn.Parameter(torch.zeros(()))
+
+        def loss(self, batch: dict) -> torch.Tensor:
+            state = batch["observation.state"]
+            action = batch["action"].reshape(-1)
+            return ((state @ self.w + self.b - action) ** 2).mean()
+
+    dim, n = 4, 32
+    design = np.linalg.qr(np.random.default_rng(0).normal(size=(n, dim)), mode="reduced")[0]
+    states = design.astype(np.float32)
+    states -= states.mean(axis=0, keepdims=True)
+    good, bad = states[:, :1].copy(), -states[:, :1]
+    pol = _LinearToy()
+    projection = torch.eye(sum(p.numel() for p in pol.parameters()))
+    both_states = np.concatenate([states, states])
+    both_actions = np.concatenate([good, bad])
+    phi = per_sample_projected_grads(pol, both_states, both_actions, projection)
+    gram = (phi.T @ phi).double()
+    cond = torch.linalg.cond(gram).item()
+    assert cond < 1e3, cond  # the old fixture was ~3.2e11; a large cond is the failure mode to catch
+    rollout = per_sample_projected_grads(pol, states, good, projection).sum(0)
+    influence = phi @ (torch.linalg.pinv(gram).float() @ rollout)
+    assert influence[:n].sum() > influence[n:].sum()
 
 
 # ------------------------------------------------------------------ rcb-score v1 frozen (D-023)

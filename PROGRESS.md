@@ -1519,3 +1519,10 @@ JSON API for checker project metadata.
 ## docs/d026-readme
 
 2026-11-25T02:35:09Z README names the D-026 balanced prediction t-test as the primary statistic (`configs/protocol.yaml` `test: d026_balanced`; docs/preregistration.md section 3). The "Subset luck is part of the error bar" paragraph no longer describes the D-016/D-019 standard error; variance components (s_sub, s_seed) are diagnostics only. Architecture blurb: statistics (D-026 primary; D-016/D-019 diagnostics). `configs/calibration/pusht_diffusion_m0.yaml`: the `intermediate_save_freq` comment now says S/10, matching `choose_steps` and stage d (`S // 10` in src/robocurate/launch/m0.py). The value is still TBD. A current-status line was added at the top; the 2026-11-19 morning milestone line was not rewritten. Commands: `ruff check .` (All checks passed); `pytest -q -m "not gpu and not slow"` (2 failed, 263 passed, 1 skipped, 21 deselected, 107.27s). Outcome: docs-only diff. Both failures are pre-existing on this CPU torch wheel and are outside the diff: `test_cupid_influence_sign_on_linear_toy` (tensor(13.0770) > tensor(33.3154)), the same assertion as main CI run 44598037403 on 8502d86; `test_sanity_cupid` is a strict xfail that XPASS under default threads and xfail as expected with OMP_NUM_THREADS=1 (main CI, which drops integration tests, recorded the expected xfail). GPU-hours: 0.
+
+## CUPID linear-toy fixture (2026-11-25T03:11Z)
+
+`test_cupid_influence_sign_on_linear_toy` no longer uses `MLPPolicy(1, 1, hidden=4)`. That gram matrix `phi.T @ phi` had condition number ~3.2e11, and the influence comparison flipped across BLAS (one runner: `tensor(13.0770) > tensor(33.3154)`). The fixture is now a linear map on a centered full-rank design: good actions are the first state coordinate, bad actions are its negation, and the rollout target matches the good actions. Measured condition number 61.85; influence sums 6.20 > -5.98. CUPID the entrant, its lambda, its disabled status, and the sanity thresholds are unchanged.
+
+Commands: `pytest -q -m "not gpu and not slow"`; `ruff check .`
+Outcome: 265 passed, 1 xfailed; ruff clean. GPU-h 0.
