@@ -1,6 +1,6 @@
 # RoboCurate-Bench pre-registration (D-032)
 
-Status: **draft for review, not tagged.** Vivek tags it `prereg-v1` after review. Written 2026-11-19, before any
+Status: **draft for review, not tagged** (updated 2026-11-20 for D-033 to D-038). Vivek tags it `prereg-v1` after review. Written 2026-11-19, before any
 entrant result exists (no result-mode run has been executed; M0 calibration has not run). After the tag, every
 change is appended to the deviations log at the end of this file with a number, a date and a reason. Earlier text
 is never edited silently.
@@ -65,11 +65,21 @@ There is one hypothesis per (entrant, task). No other comparison is confirmatory
   - Eval env seeds: `eval_seed_start` = 100000 + i for episode i.
   - Calibration evals: `calibration_seed_start` = 300000 (D-017), never eval seeds.
   - Cleaners that roll out policies: curation seeds 500000–599999, capped at 100 rollouts per (task, budget,
-    replicate) (D-007, D-022). GPU-phase mixture sources take curation seeds from the top of that range down.
+    replicate) (D-007, D-022).
+  - Data generation (mixture sources: scripted replay episodes, policy rollouts): generation seeds 700000–799999
+    (D-034), disjoint from all other blocks. Each data-generation source has its own offset, so no two share a
+    seed.
 - **Information barrier:** cleaners never receive ground-truth labels, eval code, eval seeds or eval results
   (CLAUDE.md rule 7). Selection ties are broken by a salted content hash (D-021).
 - **Frozen inputs:** each selection is computed once per (task, budget, replicate) and cached by input hash
   (D-022).
+- **Eval batch size (D-035):**
+  - ACT tasks: eval outcomes must be batch-invariant (checked on the GPU host), so the batch size is a throughput
+    choice.
+  - Diffusion tasks: Diffusion Policy samples noise at eval, so per-episode outcomes may depend on batch
+    composition. The eval batch size is fixed per task in protocol.yaml (`eval_batch_size.<task>`), written once
+    by M0 stage d (the only protocol write before the freeze) and frozen with eval-v1. The GPU check requires
+    determinism at that batch size only.
 - **Freeze:** `src/robocurate/eval/`, `configs/protocol.yaml` and `configs/frozen/` freeze at eval-v1. Eval-seed
   performance is not observed before then (D-017).
 
@@ -87,9 +97,11 @@ There is one hypothesis per (entrant, task). No other comparison is confirmatory
 | env | ALOHA sim transfer-cube (`aloha`, `AlohaTransferCube-v0`) | PushT (`pusht`, `PushT-v0`) |
 | policy | ACT | Diffusion Policy |
 | task config | `configs/tasks/aloha_transfer_cube.yaml` | `configs/tasks/pusht_diffusion.yaml` |
-| launch grid | `configs/grids/task_a_v1.yaml` (K = 8, every enabled entrant, RA-BC with 8 permutations) | `configs/grids/pusht_diffusion_v0.yaml` (K = 8, every enabled selection entrant) |
+| launch grid | `configs/grids/task_a_v1.yaml` (K = 8, every entrant enabled for ACT, RA-BC with 8 permutations) | `configs/grids/pusht_diffusion_v0.yaml` (K = 8, every selection entrant enabled for diffusion, incl. gradsim-return) |
 | mixture | `configs/mixtures/task_a_v1.yaml` | `configs/mixtures/pusht_diffusion_v1.yaml` (proposal) |
-| mixture content | 50 scripted (10 of them replay-mode perturbed: 5 jitter, 5 failed grasp), 50 human, 100 policy rollouts from full-data ACT checkpoints at 10/30/60/100% of training (25 each, successes and failures kept) | all 206 human demos + 100 policy rollouts (same checkpoint fractions) |
+| mixture content | 40 Hub scripted + 10 replay-mode perturbed scripted (generated on CPU with ACT's scripted policy: 5 jitter, 5 failed grasps) + 50 human, plus 100 policy rollouts (GPU phase) | all 206 human demos + 100 policy rollouts (GPU phase) |
+| replay perturbations (D-037) | jitter: whole-episode Gaussian noise on all 14 actions, sigma 0.643 = the noise that matches the community median high-frequency power share among jittery episodes (0.3856; docs/defect_validation.md); failed grasp: right gripper forced open from frame 135 | none (D-031's replay perturbations target scripted episodes; PushT has none; D-037 would apply to policy rollouts only if used) |
+| rollout sources (D-033, D-034) | the M0 full-data seed-1000 ACT checkpoints at 10/30/60/100% of S, 25 episodes each, successes and failures kept, generation seeds 700010–700109 | the M0 Task B full-data seed-1000 diffusion checkpoints at the same fractions, generation seeds 700000–700099 |
 | post-hoc defects | interior pauses on 50% of episodes, 0.62–1.20 s; duplicates at rate 0 (observed medians, docs/defect_validation.md); no wrong-task strings | same rates; pauses 6–12 frames at 10 fps |
 | weighting track | RA-BC (LeRobot) vs 8 progress-curve permutations (D-028) | none: LeRobot RA-BC needs `chunk_size`, which Diffusion Policy lacks |
 
@@ -115,10 +127,14 @@ wrapped tool versions are pinned in `requirements.lock`.
 | deminf | 1 | selection | reimplementation (arXiv 2502.08623) | enabled |
 | length_heuristic | 1 | selection | built-in baseline | enabled |
 | rabc | 1 | weighting | wraps LeRobot RA-BC | enabled (Task A only) |
-| cupid | 1 | selection | reimplementation (arXiv 2506.19121) | **disabled**: failed toybed sanity with ACT-style and diffusion policies (D-029) |
+| gradsim_return | 1 | selection | original (D-036): CUPID's return-weighted rollout objective + TracIn gradient similarity, no Hessian, no parameters of its own | **enabled for diffusion only** (Task B): toybed AUROC 1.000 on diffusion, 0.383 on the ACT-style toybed |
+| cupid | 1 | selection | reimplementation (arXiv 2506.19121) | **disabled**: official configuration fails toybed sanity on both toybeds (AUROC ≈ 0.5; numerically singular TRAK Gram matrix; docs/findings_cupid.md) (D-029, D-036) |
 
 An entrant that fails its toybed sanity check with published defaults is disabled. It is never tuned to pass, and
-it is not listed under its name.
+it is not listed under its name. Entrants can be enabled per policy family (D-036). A grid of another family
+refuses them (task.policy_type).
+
+License (D-038): the benchmark is Apache-2.0. Wrapped tools keep their own licenses and are never vendored.
 
 ## 8. Outcome labels (per entrant × task)
 

@@ -1,0 +1,9 @@
+# Generation spec of the 10 replay-mode scripted episodes in task_a_v1 (D-031, D-037, D-034). Consumed by
+# scripts/generate_scripted_replay.sh; the resulting dataset is a `labels: sidecar` source of task_a_v1.yaml.
+name: scripted_replay
+source: scripted_replay
+generated_in: gpu_phase                    # kind kept for the recipe validator; generated on CPU in overnight 3
+n_episodes: 10
+perturbations:
+  - {type: jitter, n_episodes: 5, sigma: 0.643, onset: 0, duration: 400}
+  - {type: gripper_drop, n_episodes: 5, onset: 135, duration: 265, gripper_dims: [13], open_value: 1.0}

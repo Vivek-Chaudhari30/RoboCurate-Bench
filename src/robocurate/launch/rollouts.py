@@ -1,11 +1,15 @@
-"""GPU-phase mixture sources (D-031): policy rollouts from full-data checkpoints and replay-mode scripted episodes,
-on CURATION seeds only (top of curation_seed_range, offset per deferred source; data/mixture.py).
+"""GPU-phase policy-rollout mixture source (D-031, D-033, D-034).
 
-  --backend fake   dry run: a stub env and stub policies exercise seeds, offsets, labels and the LeRobot writer.
-  --backend local  GPU host. Refuses today with the list of missing pieces (no adapter yet from a LeRobot
-                   checkpoint to an obs -> action callable that records camera frames, no scripted transfer-cube
-                   policy in gym-aloha 0.1.5 / lerobot 0.6.1). Those are GPU-phase prerequisites
-                   (docs/runbook_gpu.md).
+For each `policy` deferred source of a recipe: the M0 full-data seed-1000 checkpoints at the source's training
+fractions (D-033: 10/30/60/100% of S, kept by launch-kit stage e) are rolled out on DATA-GENERATION seeds
+(protocol.generation_seed_range, offset per source, D-034) with LeRobot's own eval rollout, recording full
+observations including camera frames (robocurate.sim.rollout_recorder), and written as one LeRobot dataset with a
+labels sidecar (checkpoint step, success). The replay-mode scripted episodes are produced separately
+(scripts/generate_scripted_replay.sh).
+
+  --m0-run-dir DIR --steps S        the seed-1000 full-data run of M0 and its S (checkpoints at round(f * S))
+  --fake-checkpoints                dry run: write tiny randomly initialized checkpoints at exactly those paths
+                                    first (CPU), and cap episodes / length with --max-episodes / --episode-length
 """
 
 from __future__ import annotations
@@ -16,88 +20,102 @@ import sys
 from pathlib import Path
 from typing import Any
 
-import numpy as np
-
-
-class _StubEnv:
-    """2D integrator, success near the origin; enough to exercise the writer and labels (never a benchmark)."""
-
-    def reset(self, seed=None):
-        self.r = np.random.default_rng(seed)
-        self.x = self.r.uniform(-1, 1, 2).astype(np.float32)
-        self.t = 0
-        return self.x.copy(), {}
-
-    def step(self, a):
-        self.x = (self.x + 0.1 * np.clip(np.asarray(a, dtype=np.float32), -1, 1)).astype(np.float32)
-        self.t += 1
-        ok = bool(np.linalg.norm(self.x) < 0.1)
-        return self.x.copy(), 0.0, ok, self.t >= 40, {"is_success": ok}
-
-
-def _stub_policy(fraction: float):
-    gain = 2.0 * fraction  # later checkpoints are better
-    return lambda obs: np.clip(-gain * np.asarray(obs), -1, 1).astype(np.float32)
-
 
 def checkpoint_paths(m0_run_dir: Path, steps: int, fractions: list[float]) -> dict[float, Path]:
-    """pretrained_model dirs of the rollout-source run (lerobot checkpoints/<step:06d>/pretrained_model)."""
+    """D-033 rollout-source checkpoints (lerobot checkpoints/<step>/pretrained_model)."""
     from robocurate.train.lerobot_train import checkpoint_dir
 
     return {f: checkpoint_dir(m0_run_dir / "train", int(round(f * steps)), steps) for f in fractions}
 
 
-def generate(recipe_path: str, out_dir: Path, backend: str, m0_run_dir: str | None, steps: int | None,
-             protocol_path: str) -> dict[str, Any]:
-    from robocurate.config import load_protocol
+def write_fake_checkpoints(paths: list[Path], policy_type: str, env_type: str, env_task: str) -> None:
+    """Tiny randomly initialized policies saved like lerobot-train saves them (common/train_utils.py:156-166)."""
+    import torch
+    from lerobot.envs.factory import make_env_config
+    from lerobot.policies.factory import make_policy, make_policy_config, make_pre_post_processors
+
+    if policy_type != "act":
+        raise SystemExit("fake checkpoints are implemented for ACT only")
+    env_cfg = make_env_config(env_type, task=env_task)
+    for i, p in enumerate(paths):
+        torch.manual_seed(i)
+        cfg = make_policy_config("act", dim_model=32, n_heads=2, dim_feedforward=64, n_encoder_layers=1,
+                                 n_decoder_layers=1, chunk_size=4, n_action_steps=4, use_vae=False,
+                                 pretrained_backbone_weights=None, device="cpu")
+        pol = make_policy(cfg, env_cfg=env_cfg)
+        pre, post = make_pre_post_processors(cfg, dataset_stats=None)
+        pol.save_pretrained(p)
+        pre.save_pretrained(p)
+        post.save_pretrained(p)
+
+
+def generate(recipe_path: str, task_path: str, out_dir: Path, m0_run_dir: Path, steps: int, protocol_path: str,
+             device: str, fake: bool = False, max_episodes: int | None = None,
+             episode_length: int | None = None) -> dict[str, Any]:
+    from robocurate.config import load_protocol, load_task
     from robocurate.data import mixture as M
+    from robocurate.sim import rollout_recorder as RR
 
     recipe = M.Recipe.load(recipe_path)
     proto = load_protocol(protocol_path)
-    if backend == "local":
-        missing = ["LeRobot checkpoint -> obs/action adapter recording camera frames (rollout writer stores state "
-                   "and action only; ACT/Diffusion mixtures need images)"]
-        if any(x["source"] == "scripted_replay" for x in recipe.deferred_sources):
-            missing.append("a scripted transfer-cube policy (none in gym-aloha 0.1.5 or lerobot 0.6.1)")
-        raise SystemExit("gpu_phase_rollouts: local backend not built yet. Missing: " + "; ".join(missing))
+    task = load_task(task_path)
     report: dict[str, Any] = {"recipe": recipe.name, "recipe_sha256": recipe.sha256, "sources": {}}
     for spec in recipe.deferred_sources:
+        if spec["source"] != "policy":
+            raise SystemExit(f"{spec['name']}: only policy sources are generated here")
         off = M.deferred_seed_offset(recipe, spec["name"])
-        if spec["source"] == "policy":
-            fr = [float(c["train_fraction"]) for c in spec["checkpoints"]]
-            paths = checkpoint_paths(Path(m0_run_dir), int(steps), fr) if m0_run_dir and steps else {}
-            srcs = [M.PolicySource(f"ckpt{int(c['train_fraction'] * 100)}", str(paths.get(float(c["train_fraction"]),
-                                   f"fake://ckpt{c['train_fraction']}")),
-                                   int(round(float(c["train_fraction"]) * (steps or 1000))), int(c["n_episodes"]))
-                    for c in spec["checkpoints"]]
-            load = lambda src: _stub_policy(src.checkpoint_step / (steps or 1000))  # noqa: E731
-            label = "policy"
-        else:
-            srcs = M.replay_policy_sources(spec, proto, off)
-            load = lambda src: _stub_policy(1.0)  # noqa: E731
-            label = "scripted"
-        eps = M.collect_policy_episodes(srcs, load, _StubEnv, proto, max_steps=40, seed_offset=off)
-        root = M.write_policy_dataset(eps, f"robocurate/{recipe.name}_{spec['name']}", out_dir / spec["name"],
-                                      fps=10, task="fake", shuffle_seed=recipe.seed, source_label=label)
+        seeds = M.policy_rollout_seeds(proto, int(spec["n_episodes"]), off)
+        fr = [float(c["train_fraction"]) for c in spec["checkpoints"]]
+        paths = checkpoint_paths(m0_run_dir, steps, fr)
+        if fake:
+            write_fake_checkpoints([paths[f] for f in fr], task.policy_type, task.env_type, task.env_task)
+        missing = [str(p) for p in paths.values() if not p.exists()]
+        if missing:
+            raise SystemExit(f"missing D-033 rollout-source checkpoints: {missing}")
+        eps, k = [], 0
+        for c in spec["checkpoints"]:
+            n = int(c["n_episodes"])
+            part = seeds[k:k + n][: max_episodes or n]
+            k += n
+            step = int(round(float(c["train_fraction"]) * steps))
+            eps += RR.record(paths[float(c["train_fraction"])], step, task.env_type, task.env_task, part,
+                             protocol=proto, episode_length=episode_length, device=device)
+        root = RR.write_rollout_dataset(eps, f"robocurate/{recipe.name}_{spec['name']}", out_dir / spec["name"],
+                                        fps=50 if task.env_type == "aloha" else 10, task=task.name,
+                                        shuffle_seed=recipe.seed, robot_type=task.env_type)
         report["sources"][spec["name"]] = {
             "root": str(root), "n": len(eps), "seed_range": [min(e.seed for e in eps), max(e.seed for e in eps)],
-            "success_rate": float(np.mean([e.success for e in eps])), "seed_offset": off}
+            "seed_offset": off, "checkpoints": {str(f): str(p) for f, p in paths.items()},
+            "success_by_step": {str(s): float(sum(e.success for e in eps if e.checkpoint_step == s)
+                                              / max(1, sum(e.checkpoint_step == s for e in eps)))
+                                for s in sorted({e.checkpoint_step for e in eps})}}
     return report
 
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="gpu_phase_rollouts")
     ap.add_argument("--recipe", required=True)
+    ap.add_argument("--task", required=True, help="task config (env, policy type)")
     ap.add_argument("--out", required=True)
-    ap.add_argument("--backend", choices=("fake", "local"), required=True)
-    ap.add_argument("--m0-run-dir", help="run dir of the M0 full-data seed-1000 run (rollout-source checkpoints)")
-    ap.add_argument("--steps", type=int, help="M0 step count S")
+    ap.add_argument("--m0-run-dir", required=True)
+    ap.add_argument("--steps", type=int, required=True, help="M0 step count S")
     ap.add_argument("--protocol", default="configs/protocol.yaml")
+    ap.add_argument("--device", default="cuda")
+    ap.add_argument("--fake-checkpoints", action="store_true", help="dry run (CPU): write tiny random checkpoints")
+    ap.add_argument("--max-episodes", type=int, help="dry run only: episodes per checkpoint")
+    ap.add_argument("--episode-length", type=int, help="dry run only: steps per episode")
     a = ap.parse_args(argv)
+    if (a.max_episodes or a.episode_length) and not a.fake_checkpoints:
+        raise SystemExit("--max-episodes / --episode-length are for the --fake-checkpoints dry run only")
     from robocurate.paths import require_storage_env
 
     require_storage_env()
-    rep = generate(a.recipe, Path(a.out), a.backend, a.m0_run_dir, a.steps, a.protocol)
+    if sys.platform == "darwin":
+        from robocurate.sim.scripted_aloha import ensure_cpu_renderer
+
+        ensure_cpu_renderer()
+    rep = generate(a.recipe, a.task, Path(a.out), Path(a.m0_run_dir), a.steps, a.protocol,
+                   "cpu" if a.fake_checkpoints else a.device, a.fake_checkpoints, a.max_episodes, a.episode_length)
     print(json.dumps(rep, indent=1))
     return 0
 

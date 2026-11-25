@@ -7,11 +7,13 @@ Stages
   b  smoke test: 500 training steps + 10 eval episodes on calibration seeds (D-017).
   b2 I/O check (D-027, network scratch): if GPU utilization < 50% and data wait > 30% of step time, rerun the smoke
      test with DataLoader num_workers doubled, at most twice. Nothing else may change.
-  c  GPU determinism and eval batch-invariance tests (tests/test_gpu.py, marker gpu). Failure: diagnose and exit.
+  c  GPU tests (tests/test_gpu.py, marker gpu): training seed determinism; ACT: eval batch invariance; diffusion
+     (D-035): eval determinism at the protocol-fixed eval batch size only. Failure: diagnose and exit.
   d  auto-configure: eval batch size = fastest of {5, 10, 25, 50} with peak memory < 12 GB; S = LeRobot's default
      step count (TrainPipelineConfig.steps, configs/train.py:111) capped at 2.5 h per run (train + evals); exit if the
      cap gives < 25% of the default. Writes steps, intermediate_save_freq (S/10), batch sizes and num_workers into
-     the calibration config.
+     the calibration config. Diffusion tasks (D-035): the chosen eval batch is also written into protocol.yaml's
+     eval_batch_size.<task> (the only protocol write before the eval-v1 freeze), and logged.
   e  calibration grid (resumable through the executor): D-018 cleanup, videos deleted after parsing, non-final
      checkpoints deleted after eval (except the rollout-source checkpoints, see ROLLOUT_KEEP), 200 GB disk guard,
      caps 36 GPU-h and 72 h of run time, packing (2 runs at once) only after a solo full-data run used < 50% GPU and
@@ -416,6 +418,25 @@ def write_calibration_values(path: Path, values: dict[str, Any]) -> str:
     return text
 
 
+def write_protocol_eval_batch(protocol_path: Path, task: str, value: int) -> str:
+    """D-035: the only protocol write allowed before the eval-v1 freeze: `eval_batch_size: {<task>: TBD}` ->
+    the stage-d value, for a diffusion task. Refuses if the field is missing, already set, or the file is frozen."""
+    from robocurate.config import load_protocol
+    from robocurate.paths import repo_root
+
+    if (repo_root() / "src/robocurate/eval/FROZEN").exists() and Path(protocol_path).resolve() == (
+            repo_root() / "configs/protocol.yaml").resolve():
+        raise KitError("protocol.yaml is frozen (eval-v1); D-035 write refused")
+    text = Path(protocol_path).read_text()
+    pat = re.compile(rf"^(\s+{re.escape(task)}:\s*)TBD(\s*(#.*)?)$", re.M)
+    if not pat.search(text):
+        raise KitError(f"protocol has no `eval_batch_size: {{{task}: TBD}}` entry to fill (D-035)")
+    text = pat.sub(lambda m: f"{m.group(1)}{int(value)}{m.group(2)}", text, count=1)
+    Path(protocol_path).write_text(text)
+    load_protocol(protocol_path, mode="calibration")
+    return text
+
+
 def asdict_round(r) -> dict:
     return {k: (round(v, 3) if isinstance(v, float) else v) for k, v in dataclasses.asdict(r).items()}
 
@@ -704,12 +725,13 @@ def main(argv: list[str] | None = None) -> int:
         logf.write(line + "\n")
         logf.flush()
 
-    if a.dry_run:  # never touch the repo's calibration config, results or PROGRESS.md
+    if a.dry_run:  # never touch the repo's calibration config, protocol, results or PROGRESS.md
         cal_path = state / cal_src.name
+        proto_path = state / "protocol.yaml"
+        shutil.copyfile(repo / "configs/protocol.yaml", proto_path)
         cal_text = cal_src.read_text()
-        for k in ("task", "protocol"):
-            cal_text = re.sub(rf"^{k}: (configs/\S+)", lambda m, k=k: f"{k}: {repo / m.group(1)}", cal_text,
-                              flags=re.M)
+        cal_text = re.sub(r"^task: (configs/\S+)", lambda m: f"task: {repo / m.group(1)}", cal_text, flags=re.M)
+        cal_text = re.sub(r"^protocol: (configs/\S+)", f"protocol: {proto_path}", cal_text, flags=re.M)
         cal_path.write_text(cal_text)
         results_dir = Path(a.results_dir) if a.results_dir else state / "results"
         progress = state / "PROGRESS_dryrun.md"
@@ -717,6 +739,7 @@ def main(argv: list[str] | None = None) -> int:
         sleep = lambda s: None  # noqa: E731
     else:  # pragma: no cover - GPU host
         cal_path = cal_src
+        proto_path = repo / "configs/protocol.yaml"
         results_dir = Path(a.results_dir) if a.results_dir else repo / "results" / "m0" / cal_src.stem
         progress = repo / "PROGRESS.md"
         probe = LocalProbe(load_calibration(cal_path, mode="calibration"), state)
@@ -735,13 +758,23 @@ def main(argv: list[str] | None = None) -> int:
         smoke, hist = stage_b(probe, log, default_num_workers())
         summary["smoke"] = [asdict_round(h) for h in hist]
         summary["num_workers"] = smoke.num_workers
-    if "c" in stages:
+    from robocurate.config import load_task, resolve_config_path
+
+    task_cfg = load_task(resolve_config_path(load_calibration(cal_path, mode="calibration").task),
+                         mode="calibration")
+    diffusion = task_cfg.policy_type == "diffusion"
+
+    def stage_c() -> None:
         ok, detail = probe.gpu_tests()
-        log(f"[c] GPU determinism / batch-invariance tests: {'PASS' if ok else 'FAIL'}: {detail[-300:]}")
-        summary["gpu_tests"] = {"ok": ok, "detail": detail[-2000:]}
+        what = "determinism at the protocol eval batch (D-035)" if diffusion else "determinism / batch invariance"
+        log(f"[c] GPU tests ({what}): {'PASS' if ok else 'FAIL'}: {detail[-300:]}")
+        summary["gpu_tests"] = {"ok": ok, "kind": what, "detail": detail[-2000:]}
         if not ok:
             (state / "m0_summary.json").write_text(json.dumps(summary, indent=1, default=str))
-            raise KitError("stage c failed: GPU determinism / batch invariance (diagnosis in the log); exiting")
+            raise KitError(f"stage c failed: GPU {what} (diagnosis in the log); exiting")
+
+    if "c" in stages and not diffusion:
+        stage_c()
     if "d" in stages:
         if smoke is None:
             raise KitError("stage d needs stage b in the same invocation")
@@ -755,9 +788,17 @@ def main(argv: list[str] | None = None) -> int:
                 "batch_size": default_batch_size(), "num_workers": smoke.num_workers}
         write_calibration_values(cal_path, vals)
         log(f"[d] eval timings (50 eps): {t50}; eval batch {eb}; steps {sres}; wrote {vals} -> {cal_path}")
+        if diffusion:  # D-035: fixed per task in protocol.yaml
+            write_protocol_eval_batch(proto_path, task_cfg.name, eb)
+            log(f"[d] D-035: wrote eval_batch_size.{task_cfg.name} = {eb} -> {proto_path} (the only protocol "
+                "write before the freeze)")
+            summary["protocol_eval_batch"] = {task_cfg.name: eb}
         summary["autoconf"] = {"eval_timings_50": t50, **sres, "written": vals}
         if not a.dry_run:  # pragma: no cover
-            committer.commit([cal_path], f"m0: stage d autoconf {cal_src.stem} S={sres['S']} eval_batch={eb}")
+            committer.commit([cal_path, proto_path], f"m0: stage d autoconf {cal_src.stem} S={sres['S']} "
+                             f"eval_batch={eb}")
+    if "c" in stages and diffusion:  # D-035: the determinism check needs the batch size stage d fixed
+        stage_c()
     st = None
     if "e" in stages:
         from robocurate.runs.planner import make_calibration_plan

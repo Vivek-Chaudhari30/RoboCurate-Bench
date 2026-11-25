@@ -1,7 +1,7 @@
 # Launch grid for Task B (D-030): PushT + Diffusion Policy, budget 0.5 (D-006), K = 8 random subsets (D-026).
 # n (train seeds per condition) = protocol train_seeds: TBD until M0 Task B (D-005, D-026: n_c = n_p = n >= 3).
 # Weighting track: not available for diffusion in LeRobot 0.6.1 (RA-BC needs policy.config.chunk_size,
-# utils/sample_weighting.py:150-158). CUPID: disabled for every policy family (D-029 result, PROGRESS.md).
+# utils/sample_weighting.py:150-158). CUPID: disabled for every policy family (D-029, D-036).
 name: pusht_diffusion_v0
 task: configs/tasks/pusht_diffusion.yaml
 protocol: configs/protocol.yaml
@@ -19,3 +19,4 @@ conditions:
   - {kind: cleaner, name: rcb_score, version: "1"}
   - {kind: cleaner, name: demo_score, version: "1"}
   - {kind: cleaner, name: deminf, version: "1"}
+  - {kind: cleaner, name: gradsim_return, version: "1"}           # D-036: enabled for diffusion (toybed AUROC 1.000)

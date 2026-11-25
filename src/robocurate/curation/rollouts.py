@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Protocol
 
 import numpy as np
@@ -119,11 +120,52 @@ class GymRolloutBackend:
         return out
 
 
+def checkpoint_dir(policy: Any) -> str:
+    """Checkpoint directory for a reference policy.
+
+    A path (what `lambda p: str(p)` used to return) is that directory. A loaded policy is not:
+    `str(policy)` is its repr, and the directory is `policy.config.pretrained_path`.
+    """
+    if isinstance(policy, (str, Path)):
+        return str(policy)
+    path = getattr(getattr(policy, "config", None), "pretrained_path", None)
+    if not path:
+        raise RolloutError("reference policy has no config.pretrained_path; it must be a loaded checkpoint")
+    return str(path)
+
+
+def load_lerobot_policy(path: str | Path, env_type: str, env_task: str, device: str) -> Any:
+    """LeRobot policy for a checkpoint directory (lerobot/configs/policies.py:172
+    `PreTrainedConfig.from_pretrained`, lerobot/policies/factory.py:240 `make_policy`)."""
+    from lerobot.configs.policies import PreTrainedConfig
+    from lerobot.envs.factory import make_env_config
+    from lerobot.policies import make_policy
+
+    path = str(path)
+    cfg = PreTrainedConfig.from_pretrained(path)
+    cfg.pretrained_path = path
+    cfg.device = device
+    policy = make_policy(cfg=cfg, env_cfg=make_env_config(env_type, task=env_task))
+    policy.eval()
+    return policy
+
+
+def reference_policy_loader(env_type: str, env_task: str, device: str) -> Callable[[Path], Any]:
+    """Loader installed by `robocurate prepare --reference-policy`. Returns a policy, not the path."""
+
+    def load(path: Path) -> Any:
+        return load_lerobot_policy(path, env_type, env_task, device)
+
+    return load
+
+
 class LeRobotRolloutBackend:
     """Real sim rollouts through LeRobot (GPU hosts only; never executed in the CPU test suite).
 
     Mirrors how lerobot-eval builds env/policy/processors (scripts/lerobot_eval.py:753-783) and how it reduces
     per-episode success (scripts/lerobot_eval.py:534-560), but with seeds supplied by RolloutService.
+    A path loads a policy. A policy object is used as-is; its checkpoint directory is
+    `config.pretrained_path`, not `str(policy)`.
     """
 
     def __init__(self, env_type: str, env_task: str, n_envs: int = 10, device: str = "cuda"):
@@ -131,19 +173,17 @@ class LeRobotRolloutBackend:
 
     def run(self, policy: Any, seeds: Sequence[int]) -> list[RolloutResult]:  # pragma: no cover - GPU only
         import torch
-        from lerobot.configs.policies import PreTrainedConfig
         from lerobot.envs.factory import make_env, make_env_config, make_env_pre_post_processors
-        from lerobot.policies import make_policy, make_pre_post_processors
+        from lerobot.policies import make_pre_post_processors
         from lerobot.scripts.lerobot_eval import rollout
         from lerobot.utils.constants import OBS_STATE  # "observation.state", utils/constants.py:23
 
-        path = str(policy)  # a checkpoint directory (pretrained_model)
+        path = checkpoint_dir(policy)
         env_cfg = make_env_config(self.env_type, task=self.env_task)
-        pcfg = PreTrainedConfig.from_pretrained(path)
-        pcfg.pretrained_path = path
-        pcfg.device = self.device
-        pol = make_policy(cfg=pcfg, env_cfg=env_cfg)
+        pol = (load_lerobot_policy(path, self.env_type, self.env_task, self.device)
+               if isinstance(policy, (str, Path)) else policy)
         pol.eval()
+        pcfg = pol.config
         pre, post = make_pre_post_processors(policy_cfg=pcfg, pretrained_path=path,
                                              preprocessor_overrides={"device_processor": {"device": self.device}})
         env_pre, env_post = make_env_pre_post_processors(env_cfg=env_cfg, policy_cfg=pcfg)

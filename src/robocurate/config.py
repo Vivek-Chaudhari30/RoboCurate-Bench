@@ -192,6 +192,8 @@ class ProtocolConfig(_Guarded):
     weight_permutation_seeds: list[int] | None = None  # D-020 weighting-track placebo permutations
     max_curation_rollouts: int = 100  # D-022 (cap 100, D-007)
     n_random_subsets_min: int = 3
+    generation_seed_range: list[int] | None = None  # D-034: data-generation rollouts (mixture sources) only
+    eval_batch_size: dict | None = None  # D-035: per diffusion task, fixed eval batch (TBD until M0 stage d)
 
     def __post_init__(self) -> None:
         g = lambda n: object.__getattribute__(self, n)  # noqa: E731  raw access, no TBD guard
@@ -231,6 +233,12 @@ class ProtocolConfig(_Guarded):
             n = -(-n // batch_size) * batch_size
         return (self.eval_seed_start, self.eval_seed_start + n)
 
+    def task_eval_batch_size(self, task: str) -> Any:
+        """D-035: the protocol-fixed eval batch size of a diffusion task (TBD until M0 stage d); None if the task
+        has none (ACT tasks: batch-invariant, chosen by stage d in the task/calibration config)."""
+        d = object.__getattribute__(self, "eval_batch_size") or {}
+        return d.get(task)
+
     def calibration_seed_range(self) -> tuple[int, int] | None:
         """Half-open env-seed block reserved for calibration evals (D-017)."""
         if self.calibration_seed_start is None:
@@ -240,6 +248,11 @@ class ProtocolConfig(_Guarded):
     def check_seed_disjointness(self, batch_size: int | None = None) -> None:
         ranges = {"eval": self.eval_seed_range(batch_size),
                   "curation": (self.curation_seed_range[0], self.curation_seed_range[1] + 1)}
+        gen = object.__getattribute__(self, "generation_seed_range")
+        if gen is not None:
+            if not gen[0] <= gen[1]:
+                raise ConfigError("generation_seed_range must be [lo, hi] with lo <= hi (D-034)")
+            ranges["generation"] = (gen[0], gen[1] + 1)
         cal = self.calibration_seed_range()
         if cal is not None:
             ranges["calibration"] = cal

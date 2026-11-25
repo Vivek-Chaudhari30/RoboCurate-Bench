@@ -1,8 +1,7 @@
 """Task B (D-030): PushT + Diffusion Policy. CPU only.
 
-The PushT env needs lerobot's `pusht` extra (gym-pusht, pymunk; METADATA:260-262), which is NOT in
-requirements.lock; the env test is skipped where it is not installed and was run in a scratch venv
-(PROGRESS.md, "Task B setup")."""
+The PushT env needs the `[pusht]` extra (gym-pusht, pymunk, diffusers, opencv-python; pyproject.toml), which is in
+requirements.lock since overnight 3 (item 2), so the env test runs in the default suite."""
 
 from pathlib import Path
 
@@ -44,7 +43,7 @@ def test_task_b_grid_lists_every_enabled_selection_entrant():
     g = load_grid(REPO / "configs/grids/pusht_diffusion_v0.yaml")
     listed = {c.name for c in g.condition_specs() if c.kind == "cleaner"}
     enabled = {n for n in registry.available() if registry.get(n).track == "selection"
-               and registry.disabled_reason(n) is None and n != "random_subset"}  # random_subset = the placebo
+               and registry.disabled_reason(n, "diffusion") is None and n != "random_subset"}  # random_subset = placebo
     assert listed == enabled
 
 
@@ -85,7 +84,7 @@ def test_pusht_metadata_loads_on_cpu(scratch_env):
 
 
 def test_pusht_env_reset_render_cpu():
-    pytest.importorskip("gym_pusht", reason="lerobot[pusht] extra not installed in this env (not in the lock)")
+    import gym_pusht  # noqa: F401  the [pusht] extra is locked; a missing install must FAIL, not skip
     from lerobot.envs.factory import make_env, make_env_config
 
     envs = make_env(make_env_config("pusht"), n_envs=1)
@@ -117,5 +116,7 @@ def test_task_b_fake_end_to_end(scratch_env, tmp_path, capsys):
     assert main(["report", str(res)]) == 0
     out = capsys.readouterr().out
     assert "pusht_diffusion" in out and "oracle vs placebo" in out
+    from robocurate.runs.planner import make_plan
+
     runs = [p for p in Path(res).glob("*.json") if p.name != "leaderboard.json"]
-    assert len(runs) == 19 * 3
+    assert len(runs) == len(make_plan(str(grid), "fake").units) * 3

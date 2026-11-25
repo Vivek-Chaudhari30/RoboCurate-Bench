@@ -451,3 +451,23 @@ def test_label_diagnostic_omitted_when_kept_sets_disagree(tmp_path):
     assert diag["entrants"] == [] and "disagree" in diag["unscored"][0]["reason"]
     md = (out / "report.md").read_text()
     assert "disagree" in md and "diagnostic omitted" in md and "0.600" not in md and "0.750" not in md
+
+
+def test_family_enablement_refuses_gradsim_in_act_grids(tmp_path):
+    """D-036: gradsim-return is enabled for diffusion only; an ACT grid listing it is refused."""
+    from robocurate.cleaners.registry import disabled_reason
+    from robocurate.config import ConfigError
+    from robocurate.runs.planner import make_plan
+
+    assert disabled_reason("gradsim_return", "diffusion") is None
+    assert "not enabled for policy family 'act'" in disabled_reason("gradsim_return", "act")
+    assert disabled_reason("cupid", "diffusion").startswith("disabled")
+    g = (REPO / "configs/grids/task_a_v1.yaml").read_text().replace(
+        '  - {kind: cleaner, name: deminf, version: "1"}',
+        '  - {kind: cleaner, name: deminf, version: "1"}\n  - {kind: cleaner, name: gradsim_return, version: "1"}')
+    g = g.replace("task: configs/", f"task: {REPO}/configs/")
+    g = g.replace("protocol: configs/", f"protocol: {REPO}/configs/")
+    (tmp_path / "g.yaml").write_text(g)
+    with pytest.raises(ConfigError, match="not enabled for policy family 'act'"):
+        make_plan(str(tmp_path / "g.yaml"))
+    make_plan(str(REPO / "configs/grids/pusht_diffusion_v0.yaml"))  # diffusion grid with gradsim_return plans
