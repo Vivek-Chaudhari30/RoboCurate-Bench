@@ -175,6 +175,21 @@ class _LeRobotSingleEnv:
         self.vec.close()
 
 
+def rollout_env_config(env_type: str, env_task: str | None):
+    """Build the LeRobot env config for a local rollout.
+
+    ``make_env_config`` (envs/factory.py:26) returns ``cls(**kwargs)``. Passing ``task=None``
+    overrides the dataclass default — AlohaEnv.task is ``AlohaInsertion-v0`` (envs/configs.py:150) —
+    so a run that only passed ``--env-type`` would build the wrong task. Omit ``task`` unless the
+    caller set ``--env-task``.
+    """
+    from lerobot.envs.factory import make_env_config
+
+    if env_task is None:
+        return make_env_config(env_type)
+    return make_env_config(env_type, task=env_task)
+
+
 def generate(recipe_path: str, out_dir: Path, backend: str, m0_run_dir: str | None, steps: int | None,
              protocol_path: str, env_type: str | None = None, env_task: str | None = None,
              device: str = "cpu") -> dict[str, Any]:
@@ -195,7 +210,6 @@ def generate(recipe_path: str, out_dir: Path, backend: str, m0_run_dir: str | No
             )
         if not m0_run_dir or not steps:
             raise SystemExit("gpu_phase_rollouts: --m0-run-dir and --steps are required for local policy rollouts")
-        from lerobot.envs.factory import make_env_config
 
         fracs = [
             float(c["train_fraction"])
@@ -205,12 +219,12 @@ def generate(recipe_path: str, out_dir: Path, backend: str, m0_run_dir: str | No
         for ckpt in checkpoint_paths(Path(m0_run_dir), int(steps), fracs).values():
             if not ckpt.is_dir():
                 raise FileNotFoundError(f"{ckpt} is not a pretrained_model directory")
-        env_cfg = make_env_config(env_type, task=env_task)
+        env_cfg = rollout_env_config(env_type, env_task)
         sim = _LeRobotSingleEnv(env_cfg)
         env_factory = lambda sim=sim: sim  # noqa: E731
         load_local = lambda src, env_cfg=env_cfg: load_pretrained_policy(  # noqa: E731
             src.checkpoint, env_cfg=env_cfg, device=device)
-        fps, task_name, max_steps = sim.fps, (env_task or env_type), sim.max_steps
+        fps, task_name, max_steps = sim.fps, (env_cfg.task or env_type), sim.max_steps
     else:
         env_factory = _StubEnv
         load_local = None
@@ -234,9 +248,9 @@ def generate(recipe_path: str, out_dir: Path, backend: str, m0_run_dir: str | No
                 srcs = M.replay_policy_sources(spec, proto, off)
                 load = lambda src: _stub_policy(1.0)  # noqa: E731
                 label = "scripted"
-            eps = M.collect_policy_episodes(srcs, load, env_factory, proto, max_steps=max_steps, seed_offset=off)
-            root = M.write_policy_dataset(
-                eps, f"robocurate/{recipe.name}_{spec['name']}", out_dir / spec["name"],
+            root, eps = M.write_policy_episodes(
+                srcs, load, env_factory, proto, max_steps=max_steps, seed_offset=off,
+                repo_id=f"robocurate/{recipe.name}_{spec['name']}", root=out_dir / spec["name"],
                 fps=fps, task=task_name, shuffle_seed=recipe.seed, source_label=label)
             report["sources"][spec["name"]] = {
                 "root": str(root), "n": len(eps),
@@ -257,8 +271,19 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--steps", type=int, help="M0 step count S")
     ap.add_argument("--protocol", default="configs/protocol.yaml")
     ap.add_argument("--env-type", help="LeRobot env type for --backend local (aloha, pusht)")
-    ap.add_argument("--env-task", help="gym task id, e.g. AlohaTransferCube-v0 or PushT-v0")
-    ap.add_argument("--device", default="cpu", help="policy device (cpu unless a GPU task sets CUDA_VISIBLE_DEVICES)")
+    ap.add_argument(
+        "--env-task",
+        help="gym task id, e.g. AlohaTransferCube-v0. Omit to keep the env config's default task",
+    )
+    ap.add_argument(
+        "--device",
+        default="cpu",
+        help=(
+            "policy device (default: cpu). "
+            "scripts/gpu_phase_rollouts.sh passes --device cuda for --backend local. "
+            "CUDA_VISIBLE_DEVICES does not select the device; an empty value only refuses cuda"
+        ),
+    )
     a = ap.parse_args(argv)
     from robocurate.paths import require_storage_env
 

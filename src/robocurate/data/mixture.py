@@ -20,6 +20,7 @@ from __future__ import annotations
 import hashlib
 import json
 import shutil
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -422,48 +423,88 @@ def _split_observation(obs: Any) -> tuple[np.ndarray, dict[str, np.ndarray]]:
     return np.array(np.asarray(obs, dtype=np.float32).reshape(-1), copy=True), {}
 
 
+def _policy_jobs(sources: list[PolicySource], protocol: Any, seed_offset: int) -> list[tuple[PolicySource, int]]:
+    """(source, curation seed) in collection order. One entry per episode."""
+    seeds = policy_rollout_seeds(protocol, sum(s.n_episodes for s in sources), seed_offset)
+    jobs: list[tuple[PolicySource, int]] = []
+    k = 0
+    for src in sources:
+        for _ in range(src.n_episodes):
+            jobs.append((src, seeds[k]))
+            k += 1
+    return jobs
+
+
+def _rollout_one(src: PolicySource, seed: int, base, env_factory, max_steps: int) -> PolicyEpisode:
+    """One episode. A loaded policy with reset() (chunked ACT / Diffusion) is reset here."""
+    if hasattr(base, "reset"):
+        base.reset()
+    pol = D.PerturbedPolicy(base, make_perturbations(src.perturbations), seed=seed)
+    env = env_factory()
+    obs, _ = env.reset(seed=seed)
+    states, actions, cams, success = [], [], {}, False
+    for _ in range(max_steps):
+        a = np.asarray(pol(obs), dtype=np.float32)
+        state, frame_cams = _split_observation(obs)
+        states.append(state)
+        actions.append(a)
+        if cams and set(frame_cams) != set(cams):
+            raise ValueError(f"camera keys changed mid-episode: {sorted(cams)} -> {sorted(frame_cams)}")
+        for key, img in frame_cams.items():
+            cams.setdefault(key, []).append(img)
+        obs, _, term, trunc, info = env.step(a)
+        success = success or bool(info.get("is_success", False))
+        if term or trunc:
+            break
+    stacked = {key: np.stack(frames) for key, frames in cams.items()}
+    return PolicyEpisode(src, seed, np.array(states), np.array(actions), success, stacked)
+
+
+def _release_cameras(ep: PolicyEpisode) -> None:
+    """Drop this episode's camera arrays. The caller must not keep another reference to them."""
+    ep.cameras.clear()
+
+
+def iter_policy_episodes(sources: list[PolicySource], load_policy, env_factory, protocol: Any,
+                         max_steps: int, seed_offset: int = 0) -> Iterator[PolicyEpisode]:
+    """Yield one rollout at a time. Drop ``ep.cameras`` before pulling the next episode."""
+    loaded: dict[int, Any] = {}
+    for src, seed in _policy_jobs(sources, protocol, seed_offset):
+        if id(src) not in loaded:
+            loaded[id(src)] = load_policy(src)
+        yield _rollout_one(src, seed, loaded[id(src)], env_factory, max_steps)
+
+
 def collect_policy_episodes(sources: list[PolicySource], load_policy, env_factory, protocol: Any,
                             max_steps: int, seed_offset: int = 0) -> list[PolicyEpisode]:
     """load_policy(source) -> callable obs -> action; env_factory() -> gym-style env (info['is_success']).
 
-    Camera frames on the observation are kept on PolicyEpisode.cameras. A loaded policy with reset()
-    (chunked ACT / Diffusion) is reset at every episode.
+    Keeps every episode, including camera frames. Fine for a few toy episodes. A full camera source
+    (100 ALOHA episodes) must use write_policy_episodes, which writes and releases each episode first.
     """
-    seeds = policy_rollout_seeds(protocol, sum(s.n_episodes for s in sources), seed_offset)
-    out, k = [], 0
-    for src in sources:
-        base = load_policy(src)
-        for _ in range(src.n_episodes):
-            seed = seeds[k]
-            k += 1
-            if hasattr(base, "reset"):
-                base.reset()
-            pol = D.PerturbedPolicy(base, make_perturbations(src.perturbations), seed=seed)
-            env = env_factory()
-            obs, _ = env.reset(seed=seed)
-            states, actions, cams, success = [], [], {}, False
-            for _ in range(max_steps):
-                a = np.asarray(pol(obs), dtype=np.float32)
-                state, frame_cams = _split_observation(obs)
-                states.append(state)
-                actions.append(a)
-                if cams and set(frame_cams) != set(cams):
-                    raise ValueError(f"camera keys changed mid-episode: {sorted(cams)} -> {sorted(frame_cams)}")
-                for key, img in frame_cams.items():
-                    cams.setdefault(key, []).append(img)
-                obs, _, term, trunc, info = env.step(a)
-                success = success or bool(info.get("is_success", False))
-                if term or trunc:
-                    break
-            stacked = {key: np.stack(frames) for key, frames in cams.items()}
-            out.append(PolicyEpisode(src, seed, np.array(states), np.array(actions), success, stacked))
-    return out
+    return list(iter_policy_episodes(sources, load_policy, env_factory, protocol, max_steps, seed_offset))
+
+
+def _video_spec(frame: np.ndarray) -> dict[str, Any]:
+    """One camera feature. Shape is HWC, matching hw_to_dataset_features (utils/feature_utils.py:91-99)
+    and the ALOHA task dataset. names[2] == "channel" is what dataset_to_policy_features treats as HWC
+    (utils/feature_utils.py:166)."""
+    frame = np.asarray(frame)
+    if frame.ndim != 3:
+        raise ValueError(f"camera frame must be HWC, got shape {frame.shape}")
+    h, w, c = (int(x) for x in frame.shape)
+    spec: dict[str, Any] = {
+        "dtype": "video",
+        "shape": (h, w, c),
+        "names": ["height", "width", "channel"],
+    }
+    if c == 1:
+        spec["info"] = {"is_depth_map": True}
+    return spec
 
 
 def _camera_feature_spec(episodes: list[PolicyEpisode]) -> dict[str, dict]:
-    """Video features for the cameras on these episodes. Shape is HWC, the layout
-    hw_to_dataset_features writes (utils/feature_utils.py:91-99) and the ALOHA task dataset uses.
-    Empty when no episode recorded a camera."""
+    """Video features for the cameras on these episodes. Empty when no episode recorded a camera."""
     keys = list(episodes[0].cameras)
     for ep in episodes:
         if set(ep.cameras) != set(keys):
@@ -475,23 +516,58 @@ def _camera_feature_spec(episodes: list[PolicyEpisode]) -> dict[str, dict]:
                 raise ValueError(f"{key} shape {ep.cameras[key].shape} != {episodes[0].cameras[key].shape}")
             if len(ep.cameras[key]) != len(ep.actions):
                 raise ValueError(f"{key} has {len(ep.cameras[key])} frames for {len(ep.actions)} actions")
-    features: dict[str, dict] = {}
-    for key in keys:
-        frame = np.asarray(episodes[0].cameras[key][0])
-        if frame.ndim != 3:
-            raise ValueError(f"{key} frame must be HWC, got shape {frame.shape}")
-        h, w, c = (int(x) for x in frame.shape)
-        spec: dict[str, Any] = {
-            "dtype": "video",
-            "shape": (h, w, c),
-            # names[2] == "channel" is what the ALOHA task dataset records and what
-            # dataset_to_policy_features treats as HWC (utils/feature_utils.py:166).
-            "names": ["height", "width", "channel"],
-        }
-        if c == 1:
-            spec["info"] = {"is_depth_map": True}
-        features[key] = spec
-    return features
+    return {key: _video_spec(episodes[0].cameras[key][0]) for key in keys}
+
+
+def _episode_label(ep: PolicyEpisode, out_i: int, source_label: str) -> EpisodeLabel:
+    names = ep.perturbation_names
+    return EpisodeLabel(
+        out_i, source_label, ep.source.checkpoint, ep.seed, defects=names,
+        quality_tier=max([DEFECT_TIER[d] for d in names] or ["clean"], key=TIERS.index),
+        checkpoint_step=ep.source.checkpoint_step, success=ep.success, perturbations=names,
+    )
+
+
+def _append_episode(ds, ep: PolicyEpisode, task: str, cam_keys: list[str]) -> None:
+    for key in cam_keys:
+        if len(ep.cameras[key]) != len(ep.actions):
+            raise ValueError(f"{key} has {len(ep.cameras[key])} frames for {len(ep.actions)} actions")
+    for t, (s, a) in enumerate(zip(ep.states, ep.actions, strict=True)):
+        frame: dict[str, Any] = {"task": task, "observation.state": s, "action": a}
+        for key in cam_keys:
+            frame[key] = ep.cameras[key][t]
+        ds.add_frame(frame)
+    # Images go to a temp file or the streaming encoder inside add_frame (dataset_writer.py:254-265),
+    # then save_episode encodes that episode and resets the buffer (lerobot_dataset.py:434).
+    ds.save_episode(parallel_encoding=False)
+
+
+def _open_policy_dataset(ep: PolicyEpisode, repo_id: str, root: Path, fps: int):
+    """Create the dataset from the first episode's state, action, and camera shapes."""
+    from lerobot.datasets.lerobot_dataset import LeRobotDataset
+
+    cam_keys = list(ep.cameras)
+    features: dict[str, Any] = {
+        "observation.state": {"dtype": "float32", "shape": (ep.states.shape[1],), "names": None},
+        "action": {"dtype": "float32", "shape": (ep.actions.shape[1],), "names": None},
+    }
+    for key in cam_keys:
+        features[key] = _video_spec(ep.cameras[key][0])
+    # use_videos=False is only valid when there is no camera (dataset_metadata.py:850-853).
+    ds = LeRobotDataset.create(
+        repo_id=repo_id, fps=fps, features=features, root=root, use_videos=bool(cam_keys),
+    )
+    return ds, cam_keys
+
+
+def _check_camera_layout(ep: PolicyEpisode, cam_keys: list[str], features: dict) -> None:
+    if set(ep.cameras) != set(cam_keys):
+        raise ValueError(f"camera keys differ across policy episodes: {sorted(cam_keys)} vs {sorted(ep.cameras)}")
+    for key in cam_keys:
+        got = tuple(int(x) for x in ep.cameras[key].shape[1:])
+        want = tuple(int(x) for x in features[key]["shape"])
+        if got != want:
+            raise ValueError(f"{key} shape {ep.cameras[key].shape} != {features[key]['shape']}")
 
 
 def write_policy_dataset(episodes: list[PolicyEpisode], repo_id: str, root: str | Path, fps: int, task: str,
@@ -502,22 +578,22 @@ def write_policy_dataset(episodes: list[PolicyEpisode], repo_id: str, root: str 
     (dtype ``video``, HWC) and ``use_videos=True`` — dataset_metadata.py:850 refuses video keys otherwise.
     ``LeRobotDataset.create`` (datasets/lerobot_dataset.py:684), ``add_frame`` (:418; images may be HWC,
     datasets/feature_utils.py:330), ``save_episode`` (:434), ``finalize`` (:474).
-    """
-    from lerobot.datasets.lerobot_dataset import LeRobotDataset
 
+    This holds every episode's frames. write_policy_episodes is the path that releases each episode first.
+    """
     root = Path(root)
     if root.exists():
         raise FileExistsError(f"{root} exists")
     if not episodes:
         raise ValueError("no episodes to write")
-    sd, ad = episodes[0].states.shape[1], episodes[0].actions.shape[1]
     cameras = _camera_feature_spec(episodes)
+    from lerobot.datasets.lerobot_dataset import LeRobotDataset
+
     features: dict[str, Any] = {
-        "observation.state": {"dtype": "float32", "shape": (sd,), "names": None},
-        "action": {"dtype": "float32", "shape": (ad,), "names": None},
+        "observation.state": {"dtype": "float32", "shape": (episodes[0].states.shape[1],), "names": None},
+        "action": {"dtype": "float32", "shape": (episodes[0].actions.shape[1],), "names": None},
     }
     features.update(cameras)
-    # use_videos=False is only valid when there is no camera (dataset_metadata.py:850-853).
     ds = LeRobotDataset.create(
         repo_id=repo_id, fps=fps, features=features, root=root, use_videos=bool(cameras),
     )
@@ -527,22 +603,58 @@ def write_policy_dataset(episodes: list[PolicyEpisode], repo_id: str, root: str 
     try:
         for out_i, j in enumerate(order):
             ep = episodes[int(j)]
-            for t, (s, a) in enumerate(zip(ep.states, ep.actions, strict=True)):
-                frame: dict[str, Any] = {"task": task, "observation.state": s, "action": a}
-                for key in cam_keys:
-                    frame[key] = ep.cameras[key][t]
-                ds.add_frame(frame)
-            ds.save_episode(parallel_encoding=False)
-            names = ep.perturbation_names
-            labels.append(EpisodeLabel(out_i, source_label, ep.source.checkpoint, ep.seed, defects=names,
-                                       quality_tier=max([DEFECT_TIER[d] for d in names] or ["clean"], key=TIERS.index),
-                                       checkpoint_step=ep.source.checkpoint_step, success=ep.success,
-                                       perturbations=names))
+            _append_episode(ds, ep, task, cam_keys)
+            labels.append(_episode_label(ep, out_i, source_label))
     finally:
         ds.finalize()
     write_labels(LabelsSidecar(dataset=repo_id, recipe_sha256="policy-source", seed=shuffle_seed, episodes=labels),
                  sidecar_path(root))
     return root
+
+
+def write_policy_episodes(sources: list[PolicySource], load_policy, env_factory, protocol: Any,
+                          max_steps: int, repo_id: str, root: str | Path, fps: int, task: str,
+                          shuffle_seed: int, seed_offset: int = 0, source_label: str = "policy",
+                          ) -> tuple[Path, list[PolicyEpisode]]:
+    """Roll out one episode, write it, and release its camera frames before the next rollout.
+
+    Peak host memory stays on the order of one episode: frames are not kept on a list of
+    PolicyEpisode objects. Dataset order is still the shuffle_seed permutation of collection order
+    (D-021) — episodes are rolled out in that order and appended as they finish.
+    Returned episodes have empty ``cameras``; the frames are in the dataset.
+    """
+    root = Path(root)
+    if root.exists():
+        raise FileExistsError(f"{root} exists")
+    jobs = _policy_jobs(sources, protocol, seed_offset)
+    if not jobs:
+        raise ValueError("no episodes to write")
+    order = np.random.default_rng(shuffle_seed).permutation(len(jobs))
+    loaded: dict[int, Any] = {}
+    kept: list[PolicyEpisode] = []
+    ds = None
+    cam_keys: list[str] = []
+    labels: list[EpisodeLabel] = []
+    try:
+        for out_i, j in enumerate(order):
+            src, seed = jobs[int(j)]
+            if id(src) not in loaded:
+                loaded[id(src)] = load_policy(src)
+            ep = _rollout_one(src, seed, loaded[id(src)], env_factory, max_steps)
+            if ds is None:
+                ds, cam_keys = _open_policy_dataset(ep, repo_id, root, fps)
+            else:
+                _check_camera_layout(ep, cam_keys, ds.meta.features)
+            _append_episode(ds, ep, task, cam_keys)
+            labels.append(_episode_label(ep, out_i, source_label))
+            kept.append(PolicyEpisode(src, seed, ep.states, ep.actions, ep.success, {}))
+            _release_cameras(ep)
+    finally:
+        if ds is not None:
+            ds.finalize()
+    write_labels(LabelsSidecar(dataset=repo_id, recipe_sha256="policy-source", seed=shuffle_seed, episodes=labels),
+                 sidecar_path(root))
+    return root, kept
 
 
 # ---------------------------------------------------------------------------- deferred sources (D-031)

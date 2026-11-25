@@ -73,11 +73,14 @@ pipeline stops by design, and Vivek decides (for example, fix the eval batch siz
 1. **Policy rollouts and replay-mode episodes** (`scripts/gpu_phase_rollouts.sh`). Curation seeds only, taken
    from the top of the range, with a separate offset per deferred source.
    - Sources are the M0 seed-1000 full-data checkpoints at 10/30/60/100% of S.
-   - **Camera adapter:** `load_pretrained_policy` loads a `pretrained_model` directory into an `obs -> action`
-     callable (`make_policy`, processors), and `write_policy_dataset` stores the task camera features as video.
-     `--backend local` needs `--env-type` (and `--env-task`), `--m0-run-dir` and `--steps`. A scripted
-     transfer-cube policy is still missing (gym-aloha 0.1.5 and lerobot 0.6.1 ship none), so a recipe with a
-     `scripted_replay` source still refuses. The fake backend exercises seeds, labels and the LeRobot writer.
+    - **Camera adapter:** `load_pretrained_policy` loads a `pretrained_model` directory into an `obs -> action`
+      callable (`make_policy`, processors), and each episode is written (then its frames released) before the next
+      rollout. `--backend local` needs `--env-type`, `--m0-run-dir` and `--steps`. `--env-task` is optional: omit it
+      and the env config keeps its own default task (ALOHA's is AlohaInsertion-v0); the Task A command passes
+      `AlohaTransferCube-v0`. `scripts/gpu_phase_rollouts.sh` passes `--device cuda` for `--backend local`. The CLI
+      default stays `cpu`. `CUDA_VISIBLE_DEVICES` does not select the device. A scripted transfer-cube policy is
+      still missing (gym-aloha 0.1.5 and lerobot 0.6.1 ship none), so a recipe with a `scripted_replay` source still
+      refuses. The fake backend exercises seeds, labels and the LeRobot writer.
    - GPU-h ≈ (110 / 200) × eval_h_per_200 (Task A) and (100 / 200) × eval_h_per_200 (Task B).
 2. **Build the mixtures.** Move each deferred source under `sources:` of its recipe, then run
    `build_mixture(...)`. Post-hoc pause rates then apply to all episodes. Run `robocurate validate-defects` on the

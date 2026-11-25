@@ -1,11 +1,16 @@
 """Camera frames on policy-rollout episodes (C1). Stub camera + stub policy, no ACT/Diffusion checkpoint."""
 
+import os
+import stat
+import subprocess
+
 import numpy as np
 import pytest
 
 from robocurate.config import load_protocol
 from robocurate.data import mixture as M
-from robocurate.launch.rollouts import generate, load_pretrained_policy, local_missing
+from robocurate.data.labels import load_labels, sidecar_path
+from robocurate.launch.rollouts import generate, load_pretrained_policy, local_missing, main, rollout_env_config
 from robocurate.paths import repo_root
 
 REPO = repo_root()
@@ -112,3 +117,118 @@ def test_local_backend_does_not_list_the_camera_adapter(tmp_path):
 def test_load_pretrained_policy_requires_a_directory(tmp_path):
     with pytest.raises(FileNotFoundError):
         load_pretrained_policy(tmp_path / "no-such-pretrained-model", env_cfg=object())
+
+
+def test_write_policy_episodes_releases_frames_before_the_next(tmp_path, scratch_env, monkeypatch):
+    """Each episode's camera arrays are dropped before the next rollout starts."""
+    seen: list[M.PolicyEpisode] = []
+    copies: list[np.ndarray] = []
+    real = M._rollout_one
+
+    def wrapped(*args, **kwargs):
+        assert all(not ep.cameras for ep in seen), "a previous episode still holds camera frames"
+        ep = real(*args, **kwargs)
+        assert sum(a.nbytes for a in ep.cameras.values()) > 0
+        copies.append(ep.cameras["observation.images.top"][0].copy())
+        seen.append(ep)
+        return ep
+
+    monkeypatch.setattr(M, "_rollout_one", wrapped)
+    srcs = [
+        M.PolicySource("early", "fake://early", 10, 2),
+        M.PolicySource("late", "fake://late", 90, 2),
+    ]
+    root, kept = M.write_policy_episodes(
+        srcs, lambda _src: _stub_policy, _TopCamEnv, PROTO, max_steps=3, seed_offset=0,
+        repo_id="rcb/stream_cam", root=tmp_path / "ds", fps=10, task="transfer", shuffle_seed=7,
+    )
+    assert len(seen) == 4
+    assert all(not ep.cameras for ep in seen)
+    assert all(not ep.cameras for ep in kept)
+    order = np.random.default_rng(7).permutation(4)
+    steps = [10, 10, 90, 90]
+    labels = load_labels(sidecar_path(root)).by_index()
+    assert [labels[i].checkpoint_step for i in range(4)] == [steps[int(j)] for j in order]
+    from lerobot.datasets.lerobot_dataset import LeRobotDataset
+
+    ds = LeRobotDataset("rcb/stream_cam", root=root, video_backend="pyav")
+    assert ds.meta.total_episodes == 4 and ds.meta.total_frames == 12
+    got = M._to_hwc_uint8(ds[0]["observation.images.top"])
+    np.testing.assert_allclose(got, copies[0], atol=20)
+    assert got[:8, :8, 1].mean() > 180
+
+
+def test_generate_writes_each_episode_instead_of_collecting_them(tmp_path, scratch_env, monkeypatch):
+    def boom(*_a, **_k):
+        raise AssertionError("generate must not collect every episode before writing")
+
+    monkeypatch.setattr(M, "collect_policy_episodes", boom)
+    recipe = tmp_path / "recipe.yaml"
+    recipe.write_text(
+        "name: tiny_stream\n"
+        "repo_id: robocurate/tiny_stream\n"
+        "seed: 3\n"
+        "sources: []\n"
+        "deferred_sources:\n"
+        "  - name: policy_rollouts\n"
+        "    source: policy\n"
+        "    generated_in: gpu_phase\n"
+        "    n_episodes: 3\n"
+        "    checkpoints:\n"
+        "      - {train_fraction: 0.10, n_episodes: 2}\n"
+        "      - {train_fraction: 1.00, n_episodes: 1}\n"
+    )
+    rep = generate(str(recipe), tmp_path / "out", "fake", None, None, str(REPO / "configs/protocol.yaml"))
+    assert rep["sources"]["policy_rollouts"]["n"] == 3
+
+
+def test_omitted_env_task_keeps_the_aloha_default():
+    """Passing task=None would override AlohaInsertion-v0. Omitting the kwarg keeps it."""
+    from lerobot.envs.factory import make_env_config
+
+    assert make_env_config("aloha", task=None).task is None
+    assert rollout_env_config("aloha", None).task == "AlohaInsertion-v0"
+    assert rollout_env_config("aloha", "AlohaTransferCube-v0").task == "AlohaTransferCube-v0"
+
+
+def test_device_help_does_not_claim_cuda_visible_devices_selects_it(capsys):
+    with pytest.raises(SystemExit) as ei:
+        main(["--help"])
+    assert ei.value.code == 0
+    text = " ".join(capsys.readouterr().out.split())
+    assert "default: cpu" in text
+    assert "--device cuda" in text
+    assert "CUDA_VISIBLE_DEVICES does not select the device" in text
+    assert "unless a GPU task sets CUDA_VISIBLE_DEVICES" not in text
+
+
+def test_gpu_phase_script_selects_cuda_for_local(tmp_path):
+    script = REPO / "scripts" / "gpu_phase_rollouts.sh"
+    text = script.read_text()
+    assert "--device cuda" in text
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    out = tmp_path / "args"
+    stub = bindir / "python"
+    stub.write_text('#!/bin/sh\nprintf "%s\\n" "$@" > "$STUB_OUT"\n')
+    stub.chmod(stub.stat().st_mode | stat.S_IEXEC)
+    env = os.environ.copy()
+    env["PATH"] = f"{bindir}{os.pathsep}{env.get('PATH', '')}"
+    env["ROBOCURATE_SCRATCH"] = str(tmp_path / "scratch")
+    env["HF_LEROBOT_HOME"] = str(tmp_path / "lerobot")
+    env["STUB_OUT"] = str(out)
+
+    def run(*args: str) -> list[str]:
+        subprocess.run([str(script), *args], check=True, env=env)
+        return out.read_text().splitlines()
+
+    local = run("--recipe", "r", "--out", "o", "--backend", "local", "--env-type", "aloha")
+    assert local[-2:] == ["--device", "cuda"]
+    explicit = run("--backend", "local", "--device", "cpu")
+    assert "cuda" not in explicit
+    assert explicit[-1] == "cpu"
+    equals = run("--backend=local", "--device=cpu")
+    assert "cuda" not in equals
+    fake = run("--backend", "fake")
+    assert "cuda" not in fake
+

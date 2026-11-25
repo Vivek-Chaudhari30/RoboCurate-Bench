@@ -1,5 +1,15 @@
 # PROGRESS
 
+## Camera rollouts (feat/camera-rollouts) — Bugbot fixes
+
+2026-11-25T03:09Z — `rollouts: write one episode at a time and correct task and device`. GPU-h 0. No protocol change, no FROZEN edit, no GPU job, no new dependencies.
+
+1. `write_policy_episodes` rolls an episode out in shuffle order (D-021), writes it (`add_frame` / `save_episode`), and clears `PolicyEpisode.cameras` before the next rollout. `generate` uses that path, so a 100-episode ALOHA source no longer holds every frame (about 34GB) in RAM. `collect_policy_episodes` remains for the small in-memory tests.
+2. `rollout_env_config` omits `task` when `--env-task` was not passed. `make_env_config` (envs/factory.py:26) does `cls(**kwargs)`, so `task=None` was overriding AlohaEnv's default `AlohaInsertion-v0` (envs/configs.py:150).
+3. `scripts/gpu_phase_rollouts.sh` passes `--device cuda` for `--backend local` when the caller did not pass `--device`. The CLI default stays `cpu`. The help text no longer says `CUDA_VISIBLE_DEVICES` selects the device; that variable only refuses an explicit cuda request.
+
+Commands: `ruff check .` clean. `pytest -q -m "not gpu and not slow"` → 272 passed, 1 skipped (PushT extra), 2 failed. The failures are the pre-existing CUPID pair (`test_cupid_influence_sign_on_linear_toy`, same 13.0770 vs 33.3154, and strict XPASS of `test_sanity_cupid`). Neither file was edited. Not tuned (rule 9).
+
 ## Camera rollouts (feat/camera-rollouts)
 
 2026-11-25T02:48Z — `rollouts: record camera features from LeRobot policies`. GPU-h 0. No protocol change, no FROZEN edit, no training.
