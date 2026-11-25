@@ -35,7 +35,7 @@ jobs:
       - name: Install the benchmark (exact lock; CPU torch wheels)
         run: |
           python -m pip install --upgrade pip==25.3
-          pip install -r requirements.lock --index-url https://download.pytorch.org/whl/cpu --extra-index-url https://pypi.org/simple
+          pip install --no-deps -r requirements.lock --index-url https://download.pytorch.org/whl/cpu --extra-index-url https://pypi.org/simple
           pip install -e . --no-deps
       - name: Conformance of changed cleaner packages
         run: python scripts/ci_submit.py --base "origin/${{ github.base_ref }}" --install --summary "$GITHUB_STEP_SUMMARY"

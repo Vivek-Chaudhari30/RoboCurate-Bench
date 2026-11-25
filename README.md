@@ -70,7 +70,7 @@ Baselines are random subsets, full data and the oracle.
 
 ```bash
 conda create -n rcb python=3.12 && conda activate rcb
-pip install -r requirements.lock && pip install -e ".[dev]" --no-deps
+pip install --no-deps -r requirements.lock && pip install -e ".[dev]" --no-deps
 cp scripts/env.example.sh scripts/env.sh && source scripts/env.sh
 robocurate plan configs/grids/task_a_v0.yaml
 robocurate prepare configs/grids/task_a_v0.yaml --backend fake

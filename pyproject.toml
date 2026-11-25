@@ -16,6 +16,23 @@ dependencies = [
     "pyyaml==6.0.3",
     "matplotlib==3.11.2",
     "scipy==1.18.1",
+    # Task B (D-030). Authorized exact pins inside lerobot's ranges
+    # (METADATA Requires-Dist: diffusers-dep METADATA:92; pusht METADATA:260-262).
+    # Transitives are what `pip install --dry-run` of these three added, except opencv-python.
+    # gym-pusht requires that distribution (its METADATA Requires-Dist), but it installs the same
+    # cv2 module as opencv-python-headless, which lerobot already pins (METADATA:28, <4.14,>=4.9;
+    # lock keeps 4.13.0.92). PushT render uses cv2.resize and cv2.drawMarker
+    # (gym_pusht/envs/pusht.py:316,323), which the headless wheel provides.
+    "gym-pusht==0.1.8",
+    "pymunk==6.11.1",
+    "diffusers==0.39.0",
+    "cffi==2.1.1",
+    "importlib_metadata==10.2.0",
+    "lazy-importer==0.1.0",
+    "pycparser==3.12",
+    "pygame==2.6.1",
+    "regex==2026.11.23",
+    "shapely==2.2.0",
 ]
 
 [project.optional-dependencies]

@@ -57,8 +57,9 @@ GPU-h(M0) ≈ 11 × per_run_h + smoke + autoconf
 
 ## 2. M0, Task B (PushT + Diffusion Policy, D-030)
 
-**Prerequisite:** install lerobot's `pusht` extra and diffusers on hokkaido and pin them in `requirements.lock`
-(decision needed). The checks used gym-pusht 0.1.8, pymunk 6.11.1 and diffusers 0.39.0 in a scratch venv.
+**Prerequisite:** gym-pusht 0.1.8, pymunk 6.11.1, and diffusers 0.39.0, plus the transitive pins from the
+dry run, are in `requirements.lock`. OpenCV is only `opencv-python-headless` (lerobot's pin). Install the
+lock with `--no-deps` so gym-pusht does not also pull the `opencv-python` wheel.
 
 ```bash
 scripts/m0_pipeline.sh --task b
