@@ -198,3 +198,36 @@ def test_kit_dry_run_end_to_end(tmp_path):
     real = subprocess.run([str(REPO / "scripts/m0_pipeline.sh"), "--task", "a"], capture_output=True, text=True,
                           env=env)
     assert real.returncode == 2 and "D-027" in real.stderr
+
+
+def test_d035_protocol_eval_batch_write_only_fills_the_tbd(tmp_path):
+    p = tmp_path / "protocol.yaml"
+    p.write_text((REPO / "configs/protocol.yaml").read_text())
+    K.write_protocol_eval_batch(p, "pusht_diffusion", 25)
+    from robocurate.config import load_protocol
+
+    assert load_protocol(p, mode="calibration").task_eval_batch_size("pusht_diffusion") == 25
+    with pytest.raises(K.KitError, match="D-035"):
+        K.write_protocol_eval_batch(p, "pusht_diffusion", 10)  # already set: refuses to overwrite
+    with pytest.raises(K.KitError, match="D-035"):
+        K.write_protocol_eval_batch(p, "aloha_transfer_cube", 10)  # ACT tasks have no protocol field
+
+
+def test_kit_dry_run_task_b_writes_protocol_batch_and_checks_after_d(tmp_path):
+    import os
+    import sys
+
+    env = dict(os.environ, ROBOCURATE_SCRATCH=str(tmp_path / "s"), HF_HOME=str(tmp_path / "s/hf"),
+               HF_LEROBOT_HOME=str(tmp_path / "s/lerobot"), MUJOCO_GL="egl", CUDA_VISIBLE_DEVICES="",
+               PATH=f"{Path(sys.executable).parent}:{os.environ.get('PATH', '')}")
+    (tmp_path / "s").mkdir()
+    before = (REPO / "configs/protocol.yaml").read_text()
+    p = subprocess.run([str(REPO / "scripts/m0_pipeline.sh"), "--task", "b", "--dry-run", "--fake-params",
+                        str(REPO / "configs/fake/m0_dryrun.yaml"), "--state-dir", str(tmp_path / "st")],
+                       capture_output=True, text=True, env=env, timeout=600)
+    assert p.returncode == 0, p.stderr[-3000:]
+    out = p.stdout
+    assert "D-035: wrote eval_batch_size.pusht_diffusion = 25" in out
+    assert out.index("[d] D-035") < out.index("[c] GPU tests (determinism at the protocol eval batch (D-035))")
+    assert "  pusht_diffusion: 25" in (tmp_path / "st/protocol.yaml").read_text()
+    assert (REPO / "configs/protocol.yaml").read_text() == before  # the dry run never touches the repo protocol

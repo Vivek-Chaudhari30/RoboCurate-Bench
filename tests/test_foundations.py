@@ -307,3 +307,21 @@ def test_weighting_spec_rules():
         RunSpec("t", w, 0.5, None, 0)  # weighting trains on full data
     with pytest.raises(ValueError):
         Condition("weighting")
+
+
+def test_protocol_generation_seeds_and_diffusion_eval_batch():
+    """D-034 generation_seed_range is disjoint from every other block; D-035 per-task diffusion eval batch."""
+    from robocurate.paths import repo_root
+
+    p = C.load_protocol(repo_root() / "configs/protocol.yaml")
+    assert p.generation_seed_range == [700000, 799999]
+    assert C.is_tbd(p.task_eval_batch_size("pusht_diffusion")) and p.task_eval_batch_size("aloha_transfer_cube") is None
+
+
+def test_protocol_rejects_overlapping_generation_seeds(tmp_path):
+    from helpers import PROTOCOL
+
+    q = tmp_path / "p.yaml"
+    q.write_text(PROTOCOL + "generation_seed_range: [500000, 500010]\n")
+    with pytest.raises(C.ConfigError, match="overlap"):
+        C.load_protocol(q)

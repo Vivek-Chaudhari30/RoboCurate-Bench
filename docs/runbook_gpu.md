@@ -18,8 +18,8 @@ tmux, on the branch Vivek names, with a clean git tree.
   - D-018 cleanup: each run's materialized subset is deleted after the run.
   - Eval videos are deleted after `eval_info.json` is parsed.
   - Non-final checkpoints are deleted after their eval.
-  - **Exception:** the full-data seed-1000 M0 run keeps its 10%, 30% and 60% checkpoints. They are the D-031
-    policy-rollout sources. This needs Vivek's OK, because D-027 says "only final checkpoints are kept".
+  - **D-033:** each task's M0 full-data seed-1000 run keeps its checkpoints at 10/30/60/100% of S (the D-031
+    rollout sources; stage e keeps them). Every other run keeps only its final checkpoint.
 - **GPU etiquette (CLAUDE.md):**
   - Never start while another user's process uses more than 2 GB or 10% of the GPU. Stage a polls every 10 min
     and gives up after 72 h, and every run re-checks.
@@ -40,8 +40,8 @@ scripts/m0_pipeline.sh --task a
 |---|---|---|
 | a | waits for a free GPU | log line with hours waited |
 | b, b2 | 500-step smoke train + 10 eval episodes on calibration seeds (300000+); if GPU util < 50% and data wait > 30%, retries with `num_workers` doubled (at most twice) | `smoke` in `m0_summary.json` |
-| c | `pytest -m gpu tests/test_gpu.py`: training seed determinism (loss trajectory, 1e-3 rel.) and eval batch invariance (per-episode success equal at batch 5 and 25) | on failure, the pipeline stops with the pytest output (diagnose, do not work around) |
-| d | eval batch = fastest of {5, 10, 25, 50} under 12 GB; S = LeRobot's default steps (100,000, `configs/train.py:111`) capped so one run (train + 200 final + 9 x 50 intermediate eval episodes) takes at most 2.5 h; stops if S < 25% of the default | writes `steps`, `intermediate_save_freq` (S/10), `eval_batch_size`, `batch_size` (LeRobot default 8, D-017), `num_workers` into the calibration config, and commits it |
+| c | `pytest -m gpu tests/test_gpu.py`: training seed determinism (loss trajectory, 1e-3 rel.); ACT: eval batch invariance (per-episode success equal at batch 5 and 25); diffusion (D-035): eval determinism at the protocol-fixed batch, run after stage d | on failure, the pipeline stops with the pytest output (diagnose, do not work around) |
+| d | eval batch = fastest of {5, 10, 25, 50} under 12 GB; S = LeRobot's default steps (100,000, `configs/train.py:111`) capped so one run (train + 200 final + 9 x 50 intermediate eval episodes) takes at most 2.5 h; stops if S < 25% of the default | writes `steps`, `intermediate_save_freq` (S/10), `eval_batch_size`, `batch_size` (LeRobot default 8, D-017), `num_workers` into the calibration config; diffusion tasks also write `eval_batch_size.<task>` into protocol.yaml (D-035, the only protocol write before the freeze); commits both |
 | e | 11 runs: full data x seeds 1000/1001/1002 + K = 4 random subsets (seeds 2000-2003) x seeds 1000/1001, budget 0.5; packing (2 runs at once) only after a solo full-data run used < 50% GPU and < 15 GB | one results JSON per run in `results/m0/<cal>/`, a PROGRESS.md line and a commit per run |
 | f | s_seed and s_sub with 95% CIs, step curve, cost, disk, D-026 power table (n in {3, 5}, K in {8, 12}, R in {1, 2, 3}), projected launch GPU-h, proposed design | `m0_summary.md` (also appended to PROGRESS.md) |
 
@@ -64,28 +64,40 @@ GPU-h(M0) ≈ 11 × per_run_h + smoke + autoconf
 scripts/m0_pipeline.sh --task b
 ```
 
-Same stages, with the same estimate formula. **Known risk:** Diffusion Policy samples noise during inference, so
-stage c's batch-invariance test may fail for Task B even though env seeds are batch-invariant. If it fails, the
+Same stages, with the same estimate formula. D-035: Diffusion Policy samples noise at eval, so its eval batch is
+fixed per task in protocol.yaml by stage d, and stage c (run after d) checks determinism at that batch only. If it
+fails, the
 pipeline stops by design, and Vivek decides (for example, fix the eval batch size per task in the protocol).
 
 ## 3. Mixture sources and curation scores
 
-1. **Policy rollouts and replay-mode episodes** (`scripts/gpu_phase_rollouts.sh`). Curation seeds only, taken
-   from the top of the range, with a separate offset per deferred source.
-   - Sources are the M0 seed-1000 full-data checkpoints at 10/30/60/100% of S.
-   - **Not built yet:** an adapter from a LeRobot checkpoint to an `obs -> action` callable that also records the
-     camera frames the ACT/Diffusion mixtures need. A scripted transfer-cube policy is also missing (gym-aloha
-     0.1.5 and lerobot 0.6.1 ship none). Until both exist, `--backend local` refuses with this list. The fake
-     backend exercises seeds, labels and the LeRobot writer.
-   - GPU-h ≈ (110 / 200) × eval_h_per_200 (Task A) and (100 / 200) × eval_h_per_200 (Task B).
-2. **Build the mixtures.** Move each deferred source under `sources:` of its recipe, then run
-   `build_mixture(...)`. Post-hoc pause rates then apply to all episodes. Run `robocurate validate-defects` on the
-   result.
-3. **GPU entrants' scores** (`scripts/prepare_gpu_scores.sh <grid> local`): Robometer progress for
-   robometer_filter, rcb_score and RA-BC, cached once per (task, budget, replicate) (D-022).
-   - **Not built yet:** `robocurate prepare --backend local` (it refuses today; it needs the mixture dataset,
-     Robometer weights and the M0 reference checkpoint).
-   - GPU-h = the Robometer pass over the mixture's frames, measured and reported as curation cost.
+1. **Replay-mode scripted episodes (Task A): done on CPU** (overnight 3). `scripts/generate_scripted_replay.sh`:
+   - Stage 1: ACT's scripted policy (port of tonyzhaozh/act@742c753, MIT) under ACT's simulator, mujoco 2.3.3 /
+     dm_control 1.0.9, in a separate env `ACT_SIM_PYTHON`. ACT's own code fails under mujoco 3.8.1.
+   - Stage 2: replay and recording in gym-aloha 0.1.5 / mujoco 3.8.1 on the CPU software renderer.
+   - Generation seeds 700000-700009 (D-034); jitter sigma per D-037.
+   - Output: `$ROBOCURATE_SCRATCH/generation/task_a_v1/scripted_replay`, a `labels: sidecar` source of
+     task_a_v1.yaml. Regenerate it on hokkaido only if the scratch moves.
+2. **Policy rollouts** (`scripts/gpu_phase_rollouts.sh --recipe <recipe> --task <task> --out <dir> --m0-run-dir
+   <seed-1000 full run> --steps <S> --device cuda`).
+   - The D-033 checkpoints (10/30/60/100% of S) are rolled out with LeRobot's own eval `rollout()`, recording full
+     observations including camera frames (`robocurate.sim.rollout_recorder`).
+   - Seeds are generation seeds (D-034): Task A 700010-700109 (after the scripted replay), Task B 700000-700099.
+   - Tested on CPU with tiny random checkpoints (`--fake-checkpoints`).
+   - GPU-h ≈ (100 / 200) × eval_h_per_200 per task.
+3. **Build the mixtures.** Add the rollout dataset as a `labels: sidecar` source (move it out of
+   `deferred_sources`), then run `build_mixture(...)` and `robocurate validate-defects`.
+4. **Entrant selections** (`robocurate prepare <grid> --backend local --device cuda ...`; implemented and
+   CPU-tested):
+   - CPU entrants (length, the four checkers, DemInf) need only `--dataset-root`.
+   - Robometer entrants (robometer_filter, rcb_score, rabc) also need `--robometer-model`
+     (`scripts/prepare_gpu_scores.sh` selects them).
+   - Reference-policy entrants (demo_score; gradsim_return on Task B) need `--reference-policy <M0 seed-1000 final
+     checkpoint>`.
+   - **Still needed for those last two on real tasks:** an adapter exposing a LeRobot ACT/Diffusion checkpoint
+     through the interface the entrants use (`loss(batch)` / `act`; for diffusion, `denoiser`, `alphas_cumprod`,
+     `make_samples`). They are tested on the toybed policies only.
+   - GPU-h = the Robometer pass plus rollouts, reported as curation cost.
 
 ## 4. Freeze (eval-v1)
 

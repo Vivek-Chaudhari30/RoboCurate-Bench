@@ -32,6 +32,7 @@ ENTRANTS: dict[str, str] = {
     "demo_score": f"{_E}.demo_score:DemoScore",
     "deminf": f"{_E}.deminf:DemInf",
     "cupid": f"{_E}.cupid:Cupid",
+    "gradsim_return": f"{_E}.gradsim_return:GradsimReturn",
 }
 
 
@@ -56,13 +57,22 @@ def available() -> list[str]:
     return sorted(set(BUILTINS) | set(ENTRANTS) | set(plugin_entry_points()))
 
 
-def disabled_reason(name: str) -> str | None:
-    """The status string of a disabled registered entrant (e.g. failed its toybed sanity check), else None."""
+def disabled_reason(name: str, policy_family: str | None = None) -> str | None:
+    """Why a registered entrant cannot run: its status if not "active" (e.g. failed toybed sanity), or, when the
+    entrant declares `enabled_policy_families` (D-036) and a policy family is given, that family not being enabled.
+    None if it can run."""
     try:
-        st = getattr(get(name), "status", "active")
+        c = get(name)
     except Exception:  # unknown names are handled by the caller's own lookup
         return None
-    return None if st == "active" else st
+    st = getattr(c, "status", "active")
+    if st != "active":
+        return st
+    fams = getattr(c, "enabled_policy_families", None)
+    if fams is not None and policy_family is not None and policy_family not in fams:
+        return (f"not enabled for policy family {policy_family!r} (enabled: {list(fams) or 'none'}; "
+                "toybed AUROC < 0.8, D-036)")
+    return None
 
 
 def _load_entrant(target: str):

@@ -42,6 +42,8 @@ class Cleaner(ABC):
     source: str = ""  # citation, paper section or repo@commit
     # "active", or "disabled — <reason>": disabled entrants are refused in grids and excluded from the leaderboard
     status: str = "active"
+    # D-036: None = every policy family; a tuple = only these LeRobot policy types (e.g. ("diffusion",)).
+    enabled_policy_families: tuple[str, ...] | None = None
     requires_dataset_root: bool = False  # reads the LeRobot dataset directory (checker adapters), D-022
     context: Any = None  # curation.context.CurationContext, set by the prepare stage
 
@@ -56,7 +58,8 @@ class Cleaner(ABC):
 
     def metadata(self) -> dict[str, Any]:
         return {"name": self.name, "version": self.version, "implementation": self.implementation,
-                "source": self.source, "status": self.status, **self.resources()}
+                "source": self.source, "status": self.status,
+                "enabled_policy_families": self.enabled_policy_families, **self.resources()}
 
 
 class WeightingCleaner(Cleaner):

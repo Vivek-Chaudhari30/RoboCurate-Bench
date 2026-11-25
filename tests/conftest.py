@@ -4,6 +4,13 @@ import pytest
 
 # CPU-only guard for the whole test session (task rule: no GPU use).
 os.environ["CUDA_VISIBLE_DEVICES"] = ""
+os.environ["PYTORCH_ENABLE_MPS_FALLBACK"] = "0"
+# macOS: MuJoCo accepts only cgl/glfw there (mujoco/rendering/classic/gl_context.py:25-34), both hardware OpenGL;
+# `disable` loads no GL backend, and robocurate.sim.cpu_render then renders on the Apple Software Renderer (CPU).
+import sys  # noqa: E402
+
+if sys.platform == "darwin" and os.environ.get("MUJOCO_GL", "").lower() not in ("disable", "disabled", "off"):
+    os.environ["MUJOCO_GL"] = "disable"
 
 # LeRobot resolves HF_LEROBOT_HOME once, at import (lerobot/utils/constants.py:69). Import it here, under the
 # session's real storage env, so a first import inside a `scratch_env` test (which monkeypatches HF_LEROBOT_HOME to a
