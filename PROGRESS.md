@@ -2097,13 +2097,18 @@ JSON API for checker project metadata.
 - A loss(batch) adapter so CUPID can run on LeRobot PreTrainedPolicy (ACT); a reserved seed block for the
   policy-rollout mixture source instead of the top of the curation range.
 - trajlens adapter via an isolated venv CLI (its pyarrow<25 pin conflicts with the core lock).
-- Label diagnostics in the report (precision/recall of each cleaner's kept set vs labels, D-008).
 - Replay-mode defect generation in sim (jitter/gripper drop) to build `bad`-tier episodes.
 - A subset-variance-aware null simulation as a slow test, once open question 1 is decided.
 
 ## docs/d026-readme
 
 2026-11-25T02:35:09Z README names the D-026 balanced prediction t-test as the primary statistic (`configs/protocol.yaml` `test: d026_balanced`; docs/preregistration.md section 3). The "Subset luck is part of the error bar" paragraph no longer describes the D-016/D-019 standard error; variance components (s_sub, s_seed) are diagnostics only. Architecture blurb: statistics (D-026 primary; D-016/D-019 diagnostics). `configs/calibration/pusht_diffusion_m0.yaml`: the `intermediate_save_freq` comment now says S/10, matching `choose_steps` and stage d (`S // 10` in src/robocurate/launch/m0.py). The value is still TBD. A current-status line was added at the top; the 2026-11-19 morning milestone line was not rewritten. Commands: `ruff check .` (All checks passed); `pytest -q -m "not gpu and not slow"` (2 failed, 263 passed, 1 skipped, 21 deselected, 107.27s). Outcome: docs-only diff. Both failures are pre-existing on this CPU torch wheel and are outside the diff: `test_cupid_influence_sign_on_linear_toy` (tensor(13.0770) > tensor(33.3154)), the same assertion as main CI run 44598037403 on 8502d86; `test_sanity_cupid` is a strict xfail that XPASS under default threads and xfail as expected with OMP_NUM_THREADS=1 (main CI, which drops integration tests, recorded the expected xfail). GPU-hours: 0.
+
+## Label diagnostics (D-008) — 2026-11-25, branch feat/report-precision-recall
+
+| UTC | what changed | commands | outcome | GPU-h |
+|---|---|---|---|---|
+| 2026-11-25T02:41Z | report: per-entrant precision and recall of the cached kept set (`extra.selected_episodes`) joined to one `*.labels.json` sidecar via `data/labels.py`. Positive class `quality_tier` clean; degraded and bad are negative. Written on the selection panel of report.md and leaderboard.json, labelled diagnostic. Confirmatory D-026 test, comparisons, and stats.py unchanged. | `ruff check .`; `pytest -q -m "not gpu and not slow"` (ROBOCURATE_SCRATCH=/tmp/robocurate-scratch) | ruff clean. 265 passed, 1 skipped, 2 failed. Failures are pre-existing and reproduced in isolation, files untouched: `test_sanity_cupid` (strict xpass) and `test_cupid_influence_sign_on_linear_toy` (influence sign, torch 2.11.0 CPU). New tests passed. | 0 |
 
 ## CUPID linear-toy fixture (2026-11-25T03:11Z)
 

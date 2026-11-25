@@ -7,6 +7,11 @@ labeled secondary diagnostic. Weighting track (D-020): each entrant vs its own p
 placebo, Holm across weighting entrants; unweighted full data is a reference. Oracle (D-012) and full data are
 reference conditions outside the Holm family. Welch vs pooled placebo runs is kept as a labeled SECONDARY
 diagnostic. Rollouts are never pooled across runs.
+
+Label precision and recall (D-008) are a separate diagnostic. When the results directory contains one
+`*.labels.json` sidecar, each entrant's cached `selected_episodes` is joined to it (data/labels.py). The
+positive class is quality_tier `clean`; `degraded` and `bad` are negative. Those numbers do not enter the
+confirmatory test.
 """
 
 from __future__ import annotations
@@ -23,6 +28,7 @@ import numpy as np
 from scipy import stats as sps
 
 from robocurate import results
+from robocurate.data.labels import TIERS, LabelsSidecar, load_labels
 from robocurate.report import stats as S
 
 FAKE_BANNER = "# ⚠️ FAKE RESULTS — SYNTHETIC BACKEND, NOT REAL POLICY PERFORMANCE ⚠️"
@@ -63,6 +69,11 @@ def _consistency(recs: list[dict]) -> list[str]:
 
 
 INELIGIBLE = "NOT RESULT-ELIGIBLE (design below protocol minimum)"
+
+# D-008 diagnostic. Positive class is the best quality tier; everything else in the sidecar is a negative.
+POSITIVE_TIER = "clean"
+NEGATIVE_TIERS = tuple(t for t in TIERS if t != POSITIVE_TIER)
+DIAGNOSTIC_NOTE = "diagnostic only (D-008); not part of the confirmatory test"
 
 
 def design_eligibility(unit_counts: list[int], K: int) -> list[str]:
@@ -268,6 +279,132 @@ def _fmt(x: float | None, nd=3) -> str:
     return "—" if x is None or (isinstance(x, float) and math.isnan(x)) else f"{x:.{nd}f}"
 
 
+def discover_label_sidecar(results_dir: str | Path) -> Path | None:
+    """The single `*.labels.json` in a results directory, or None when the report has no labels to score."""
+    files = sorted(p for p in Path(results_dir).glob("*.labels.json") if p.is_file())
+    if not files:
+        return None
+    if len(files) > 1:
+        raise ReportError(f"multiple label sidecars in {results_dir}: {[p.name for p in files]} "
+                          "(need exactly one *.labels.json)")
+    return files[0]
+
+
+def _episode_ids(raw: Any) -> list[int] | None:
+    if not isinstance(raw, list) or any(isinstance(i, bool) or not isinstance(i, int) for i in raw):
+        return None
+    return [int(i) for i in raw]
+
+
+def _entrant_kept(recs: list[dict]) -> dict[tuple[str, float, str], tuple[list[int] | None, str | None]]:
+    """Cached kept set per (task, budget, entrant). The error string is set when the runs cannot be joined."""
+    grouped: dict[tuple[str, float, str], list[Any]] = defaultdict(list)
+    for r in recs:
+        cond = r["spec"]["condition"]
+        if cond.get("kind") != "cleaner":
+            continue
+        grouped[(r["spec"]["task"], float(r["spec"]["budget"]), _label(cond))].append(
+            (r.get("extra") or {}).get("selected_episodes"))
+    out: dict[tuple[str, float, str], tuple[list[int] | None, str | None]] = {}
+    for key, raws in grouped.items():
+        parsed: list[list[int]] = []
+        malformed = False
+        for raw in raws:
+            ids = _episode_ids(raw)
+            if ids is None:
+                malformed = True
+                break
+            parsed.append(ids)
+        if malformed:
+            out[key] = (None, "cached selected_episodes missing or not a list of episode indices")
+        elif any(len(ids) != len(set(ids)) for ids in parsed):
+            out[key] = (None, "cached selected_episodes contains duplicate indices")
+        elif len({tuple(sorted(ids)) for ids in parsed}) != 1:
+            out[key] = (None, "cached selected_episodes disagree across runs")
+        else:
+            out[key] = (sorted(set(parsed[0])), None)
+    return out
+
+
+def kept_set_scores(kept: list[int], labels: LabelsSidecar) -> dict[str, Any]:
+    """Precision and recall of one kept set. Positive = quality_tier `clean`; negative = `degraded` or `bad`.
+
+    Recall is over every positive episode in the sidecar. An empty kept set has undefined precision; a sidecar
+    with no positive episode has undefined recall.
+    """
+    by = labels.by_index()
+    missing = sorted(set(kept) - set(by))
+    if missing:
+        raise ReportError(f"selected episodes absent from the label sidecar: {missing[:10]}")
+    positive = {i for i, ep in by.items() if ep.quality_tier == POSITIVE_TIER}
+    kept_set = set(kept)
+    tp = len(kept_set & positive)
+    n_kept, n_pos = len(kept_set), len(positive)
+    return {"precision": None if n_kept == 0 else tp / n_kept,
+            "recall": None if n_pos == 0 else tp / n_pos,
+            "n_kept": n_kept, "n_positive": n_pos, "n_true_positive": tp,
+            "positive_class": POSITIVE_TIER, "negative_class": list(NEGATIVE_TIERS), "diagnostic": True}
+
+
+def _attach_label_diagnostics(analysis: dict[str, Any], recs: list[dict], results_dir: str | Path) -> None:
+    """Join cached selected_episodes to the sidecar. No-op when the results directory has no labels file.
+
+    Disabled entrants stay excluded. A kept set that cannot be joined is listed under `unscored` and is not
+    given a number. Weighting panels have no kept set and are left alone. The confirmatory comparisons are
+    not modified.
+    """
+    path = discover_label_sidecar(results_dir)
+    if path is None:
+        return
+    try:
+        labels = load_labels(path)
+    except ValueError as e:
+        raise ReportError(f"label sidecar {path.name}: {e}") from e
+    kept = _entrant_kept(recs)
+    for task_info in analysis["tasks"]:
+        for b in task_info["budgets"]:
+            keys = [k for k in kept if k[0] == task_info["task"] and k[1] == float(b["budget"])
+                    and not _disabled(k[2].split(":", 1)[1])]
+            if not keys:
+                continue
+            rows, unscored = [], []
+            for key in sorted(keys, key=lambda k: k[2]):
+                ids, err = kept[key]
+                name = key[2]
+                if err:
+                    unscored.append({"name": name, "reason": err})
+                    continue
+                try:
+                    rows.append({"name": name, **kept_set_scores(ids, labels)})
+                except ReportError as e:
+                    unscored.append({"name": name, "reason": str(e)})
+            b["label_diagnostics"] = {
+                "role": "diagnostic", "decision": "D-008", "note": DIAGNOSTIC_NOTE,
+                "positive_class": POSITIVE_TIER, "negative_class": list(NEGATIVE_TIERS),
+                "labels_file": path.name, "dataset": labels.dataset, "n_labeled": len(labels.episodes),
+                "entrants": rows, "unscored": unscored}
+
+
+def _diagnostic_lines(diag: dict[str, Any]) -> list[str]:
+    neg = ", ".join(f"`{t}`" for t in diag["negative_class"])
+    lines = [f"**Label diagnostics (D-008; {diag['note']})**", "",
+             f"Positive class: quality_tier `{diag['positive_class']}`. Negative class: {neg}. "
+             f"Joined cached `selected_episodes` to `{diag['labels_file']}` "
+             f"({diag['n_labeled']} labeled episodes, dataset {diag['dataset']}).", ""]
+    if diag["entrants"]:
+        lines += ["| entrant | precision | recall | kept | true positives | positives |",
+                  "|---|---|---|---|---|---|"]
+        for e in diag["entrants"]:
+            lines.append(f"| {e['name']} | {_fmt(e['precision'])} | {_fmt(e['recall'])} | {e['n_kept']} | "
+                         f"{e['n_true_positive']} | {e['n_positive']} |")
+        lines.append("")
+    for u in diag["unscored"]:
+        lines.append(f"- ⚠️ {u['name']}: {u['reason']} (diagnostic omitted)")
+    if diag["unscored"]:
+        lines.append("")
+    return lines
+
+
 def _panels(a: dict[str, Any]) -> list[tuple[str, str, dict]]:
     out = []
     for t in a["tasks"]:
@@ -328,6 +465,8 @@ def render_markdown(a: dict[str, Any], plot_name: str | None, n_files: int) -> s
                   f"{' (truncated at 0)' if m['s_sub_truncated'] else ''}, s_seed = {m['s_seed']:.3f}; design "
                   f"K = {m['K']}, n_p = {m['n_p']}, n_c = {m['n_c']}, df = {m['df']}; MDE at 80% power with "
                   f"Bonferroni over {m['n_comparisons']} entrant(s): **{m['mde']:.3f}** ({100 * m['mde']:.1f} pp).", ""]
+        if b.get("label_diagnostics"):
+            L += _diagnostic_lines(b["label_diagnostics"])
     if plot_name:
         L += [f"![per-run success by condition]({plot_name})", ""]
     if a["fake"]:
@@ -384,6 +523,7 @@ def write_report(results_dir: str | Path, out_dir: str | Path | None = None, n_b
     out_dir.mkdir(parents=True, exist_ok=True)
     recs = results.load_dir(results_dir)
     a = analyze(recs, n_boot=n_boot)
+    _attach_label_diagnostics(a, recs, results_dir)
     plot = render_plot(a, out_dir / ("FAKE_success_by_condition.png" if a["fake"] else "success_by_condition.png"))
     (out_dir / "report.md").write_text(render_markdown(a, plot.name, len(recs)))
     a["generated_utc"] = datetime.now(UTC).isoformat()

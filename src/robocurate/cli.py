@@ -188,6 +188,15 @@ def cmd_report(args) -> int:
             m = b["mde"]
             print(f"  s_sub={m['s_sub']:.3f}{' (truncated)' if m['s_sub_truncated'] else ''} s_seed={m['s_seed']:.3f} "
                   f"K={m['K']} n_p={m['n_p']} n_c={m['n_c']}  MDE (80% power): {m['mde']:.3f}")
+        diag = b.get("label_diagnostics")
+        if diag:
+            print(f"  label diagnostics (D-008, diagnostic only) from {diag['labels_file']}:")
+            for e in diag["entrants"]:
+                prec = "n/a" if e["precision"] is None else f"{e['precision']:.3f}"
+                rec = "n/a" if e["recall"] is None else f"{e['recall']:.3f}"
+                print(f"    {e['name']} precision={prec} recall={rec}")
+            for u in diag["unscored"]:
+                print(f"    {u['name']}: omitted ({u['reason']})")
         for i in b["issues"]:
             print(f"  INVALID: {i}")
     print(f"wrote {out / 'report.md'}, {out / 'leaderboard.json'}")
