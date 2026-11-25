@@ -1,5 +1,13 @@
 # PROGRESS
 
+## Camera rollouts (feat/camera-rollouts)
+
+2026-11-25T02:48Z — `rollouts: record camera features from LeRobot policies`. GPU-h 0. No protocol change, no FROZEN edit, no training.
+
+`load_pretrained_policy` (`src/robocurate/launch/rollouts.py`) loads a `pretrained_model` dir into an obs→action callable via `PreTrainedConfig.from_pretrained` (configs/policies.py:172), `make_policy` (policies/factory.py:240), `make_pre_post_processors` (policies/factory.py:150), `make_env_pre_post_processors` (envs/factory.py:37), `preprocess_observation` (envs/utils.py:68). `PolicyEpisode.cameras` and `write_policy_dataset` store those frames as video features (HWC, dtype video, `use_videos=True`; `LeRobotDataset.create` datasets/lerobot_dataset.py:684, `add_frame` :418). `--backend local` no longer lists that adapter as missing. A `scripted_replay` source still refuses (no scripted transfer-cube policy). CPU regression: stub camera + stub policy round-trips through `LeRobotDataset` (`tests/test_camera_rollouts.py`). No real ACT/Diffusion checkpoint.
+
+Commands: `ruff check .` clean. `pytest -q -m "not gpu and not slow"` → 267 passed, 1 skipped (PushT extra, not in the lock), 2 failed. The failures are `test_cupid_influence_sign_on_linear_toy` and strict XPASS of `test_sanity_cupid`. Neither file was edited; the same numbers come back in isolation. Not tuned (rule 9).
+
 ## Status 2026-11-19 (D-026 task, branch m1-core)
 
 Commits on m1-core (pushed): `0003aa3` D-026 test + refusals + tables; `2fec523` D-025 placebo; `cb3a8d2` CUPID
