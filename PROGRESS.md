@@ -1,5 +1,41 @@
 # PROGRESS
 
+## Checker slice: Task A 90-episode CPU part (2026-11-25T02:31Z)
+
+CPU only, on this Mac (`Viveks-Macbook-M5-Pro.local`). GPU-h 0. Thresholds stayed at the installed defaults (lerobot-doctor 0.2.0, kinema 0.1.0, roboaudit 0.3.1, robot-data-audit 0.12.5). The slice was already on disk; it was not rebuilt, and `HF_HUB_OFFLINE=1` blocked any Hub download.
+
+Dataset: `$ROBOCURATE_SCRATCH/datasets/robocurate/task_a_v1_cpu` — 90 episodes, 38,085 frames (40 Hub scripted + 50 human). The labels sidecar sits beside that root and was read only after `prepare` returned: 45 clean, 45 paused. Git `f3601c4` (clean tree). LeRobot 0.6.1.
+
+```
+source scripts/env.sh
+CUDA_VISIBLE_DEVICES="" HF_HUB_OFFLINE=1 \
+  robocurate prepare configs/grids/task_a_v1.yaml \
+  --backend local --device cpu \
+  --dataset-root $ROBOCURATE_SCRATCH/datasets/robocurate/task_a_v1_cpu \
+  --only lerobot_doctor,kinema,roboaudit,rda \
+  --selections-dir $ROBOCURATE_SCRATCH/selections/checker-slice-task-a-cpu
+```
+
+Budget 0.5 keeps exactly 45/90 episodes for every checker (`budget_count`, `src/robocurate/cleaners/base.py:116-120`). The clean / pause / scripted / human columns are the fraction of that post-hoc group inside those 45. Tool keep / review / exclude are the adapter's rank classes (0 / 1 / 2) over all 90; an episode the tool does not mention is class 0. Tool kept = class 0 / 90.
+
+| checker | wall | keep | review | exclude | tool kept | kept clean | kept pause | kept scripted | kept human |
+|---|---|---|---|---|---|---|---|---|---|
+| lerobot-doctor | 0.15 s | 70 | 0 | 20 | 70/90 = 0.778 | 31/45 = 0.689 | 14/45 = 0.311 | 16/40 = 0.400 | 29/50 = 0.580 |
+| kinema | 0.39 s | 90 | 0 | 0 | 90/90 = 1.000 | 23/45 = 0.511 | 22/45 = 0.489 | 22/40 = 0.550 | 23/50 = 0.460 |
+| roboaudit | 83.56 s | 85 | 5 | 0 | 85/90 = 0.944 | 22/45 = 0.489 | 23/45 = 0.511 | 24/40 = 0.600 | 21/50 = 0.420 |
+| RDA | 13.65 s | 90 | 0 | 0 | 90/90 = 1.000 | 22/45 = 0.489 | 23/45 = 0.511 | 20/40 = 0.500 | 25/50 = 0.500 |
+
+- **lerobot-doctor, index-order cap.** The tool's own summary is `45/90 episode(s) flagged`, then `...and 25 more flagged episodes` (`lerobot_doctor/checks/per_episode.py:153-160`: at most 20 `Episode {idx}:` lines, lowest indices first). The adapter keeps only those 20 lines (`src/robocurate/cleaners/entrants/checkers.py:73-76`, `:89-95`). Reported indices: 0, 1, 2, 4, 5, 6, 7, 8, 9, 12, 13, 14, 15, 24, 25, 30, 32, 33, 34, 36. The other 25 flagged episodes are scored as unflagged, so the adapter's keep count is 70/90 rather than 45/90. All 20 reported episodes fell outside the 45; the omitted 25 stay in the keep class and can be selected. That is an index-order bias.
+- **kinema** returned no per-episode finding, so the 45 are a D-021 tie-break (clean 23, pause 22). During that run the duplicate check printed divide-by-zero, overflow, and invalid-value warnings (`kinema/checks/duplicates.py:235`) and still finished.
+- **roboaudit** marked 5 review and 0 exclude. Review ranks below keep, so the 45 are taken from the 85 keep.
+- **RDA** marked every episode PASS (class 0 on all 90) and ranked by its score. Clean 22, pause 23.
+
+Selection records: `$ROBOCURATE_SCRATCH/selections/checker-slice-task-a-cpu` (keys `7c47888422ae`, `5f8083033747`, `7071198d40f7`, `7d1c5df14897`). Each record's `gpu_h` is 0.000. Rollouts 0.
+
+| UTC | what changed | commands | outcome |
+|---|---|---|---|
+| 2026-11-25T02:31Z | checker slice on the existing 90-episode Task A CPU part; kept-fraction table above; no threshold change | `robocurate prepare configs/grids/task_a_v1.yaml --backend local --device cpu --dataset-root $ROBOCURATE_SCRATCH/datasets/robocurate/task_a_v1_cpu --only lerobot_doctor,kinema,roboaudit,rda --selections-dir $ROBOCURATE_SCRATCH/selections/checker-slice-task-a-cpu`; then `pytest -q -m "not gpu and not slow"`; `ruff check .` | four selections, 45 episodes each; pytest 287 passed, 1 xfailed; ruff clean; GPU-h 0 |
+
 ## Morning summary (CPU completion 2)
 
 Overnight 3, 2026-11-19 21:23Z to 08:40Z (about 11.3 wall-clock (the Mac appears to have slept at times; the 10 h budget ended at 07:23Z) h of the 10 h budget). Branch `m1-core`, pushed after
