@@ -9,6 +9,6 @@ train_seeds: [1000, 1001, 1002]
 steps: TBD                         # S, written by m0_pipeline.sh stage d (LeRobot default capped at 2.5 h/run)
 n_final_rollouts: 200
 n_intermediate_rollouts: 50
-intermediate_save_freq: TBD        # written by stage d (S / 5)
+intermediate_save_freq: TBD        # written by stage d (S / 10)
 random_subsets: {budget: 0.5, n_subsets: 4, train_seeds: [1000, 1001]}
 num_workers: null                  # D-027: set only by the stage b2 I/O check (speed, not results)
