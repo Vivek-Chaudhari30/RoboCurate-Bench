@@ -1,5 +1,7 @@
 # PROGRESS
 
+**Current status:** B-006 is closed by D-027 (hokkaido scratch `/share/datasets/robocurate`). The morning line that says M0 is BLOCKED on the hokkaido scratch path (B-006) is historical.
+
 ## Checker slice: Task A 90-episode CPU part (2026-11-25T02:31Z)
 
 CPU only, on this Mac (`Viveks-Macbook-M5-Pro.local`). GPU-h 0. Thresholds stayed at the installed defaults (lerobot-doctor 0.2.0, kinema 0.1.0, roboaudit 0.3.1, robot-data-audit 0.12.5). The slice was already on disk; it was not rebuilt, and `HF_HUB_OFFLINE=1` blocked any Hub download.
@@ -2097,6 +2099,10 @@ JSON API for checker project metadata.
 - trajlens adapter via an isolated venv CLI (its pyarrow<25 pin conflicts with the core lock).
 - Replay-mode defect generation in sim (jitter/gripper drop) to build `bad`-tier episodes.
 - A subset-variance-aware null simulation as a slow test, once open question 1 is decided.
+
+## docs/d026-readme
+
+2026-11-25T02:35:09Z README names the D-026 balanced prediction t-test as the primary statistic (`configs/protocol.yaml` `test: d026_balanced`; docs/preregistration.md section 3). The "Subset luck is part of the error bar" paragraph no longer describes the D-016/D-019 standard error; variance components (s_sub, s_seed) are diagnostics only. Architecture blurb: statistics (D-026 primary; D-016/D-019 diagnostics). `configs/calibration/pusht_diffusion_m0.yaml`: the `intermediate_save_freq` comment now says S/10, matching `choose_steps` and stage d (`S // 10` in src/robocurate/launch/m0.py). The value is still TBD. A current-status line was added at the top; the 2026-11-19 morning milestone line was not rewritten. Commands: `ruff check .` (All checks passed); `pytest -q -m "not gpu and not slow"` (2 failed, 263 passed, 1 skipped, 21 deselected, 107.27s). Outcome: docs-only diff. Both failures are pre-existing on this CPU torch wheel and are outside the diff: `test_cupid_influence_sign_on_linear_toy` (tensor(13.0770) > tensor(33.3154)), the same assertion as main CI run 44598037403 on 8502d86; `test_sanity_cupid` is a strict xfail that XPASS under default threads and xfail as expected with OMP_NUM_THREADS=1 (main CI, which drops integration tests, recorded the expected xfail). GPU-hours: 0.
 
 ## Label diagnostics (D-008) — 2026-11-25, branch feat/report-precision-recall
 
