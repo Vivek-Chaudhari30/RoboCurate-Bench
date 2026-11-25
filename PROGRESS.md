@@ -1,5 +1,14 @@
 # PROGRESS
 
+## Camera rollouts (feat/camera-rollouts) — retry and per-episode seed
+
+2026-11-25T03:26Z — `rollouts: drop a failed dataset and seed each episode`. GPU-h 0. No protocol change, no FROZEN edit, no GPU job, no new dependencies. CUPID not tuned.
+
+1. `write_policy_episodes` writes into a sibling partial directory and publishes `root` only after every episode is saved and the labels sidecar is written. A failure deletes that partial directory (and an unlabeled root), so the same output path can be retried. A finished root, with its sidecar, still raises `FileExistsError`.
+2. `_rollout_one` calls `torch.manual_seed(env_seed)` before `policy.reset()`. Diffusion `select_action` draws `torch.randn` with `generator=None` (modeling_diffusion.py:248); `DiffusionPolicy.reset` only clears queues (modeling_diffusion.py:92). Dataset order stays the shuffle permutation (D-021). Peak memory stays one episode.
+
+Commands: `ruff check .` clean. `pytest -q -m "not gpu and not slow"` → 274 passed, 1 skipped (PushT extra), 2 failed. The failures are the pre-existing CUPID pair (`test_cupid_influence_sign_on_linear_toy`, same 13.0770 vs 33.3154, and strict XPASS of `test_sanity_cupid`). Neither file was edited.
+
 ## Camera rollouts (feat/camera-rollouts) — Bugbot fixes
 
 2026-11-25T03:09Z — `rollouts: write one episode at a time and correct task and device`. GPU-h 0. No protocol change, no FROZEN edit, no GPU job, no new dependencies.

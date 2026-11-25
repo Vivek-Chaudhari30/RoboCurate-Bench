@@ -17,6 +17,7 @@ sources and are not produced by this module.)
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import shutil
@@ -435,8 +436,22 @@ def _policy_jobs(sources: list[PolicySource], protocol: Any, seed_offset: int) -
     return jobs
 
 
+def _seed_episode_rng(seed: int) -> None:
+    """Tie this episode's torch noise to its env seed.
+
+    Diffusion ``conditional_sample`` draws ``torch.randn(..., generator=None)``
+    (modeling_diffusion.py:248), so the draw uses the global generator.
+    ``DiffusionPolicy.reset`` (modeling_diffusion.py:92) only clears the action queue.
+    Seed once, before that reset, so which episode ran earlier cannot change this one.
+    """
+    import torch
+
+    torch.manual_seed(int(seed))
+
+
 def _rollout_one(src: PolicySource, seed: int, base, env_factory, max_steps: int) -> PolicyEpisode:
     """One episode. A loaded policy with reset() (chunked ACT / Diffusion) is reset here."""
+    _seed_episode_rng(seed)
     if hasattr(base, "reset"):
         base.reset()
     pol = D.PerturbedPolicy(base, make_perturbations(src.perturbations), seed=seed)
@@ -612,6 +627,26 @@ def write_policy_dataset(episodes: list[PolicyEpisode], repo_id: str, root: str 
     return root
 
 
+def _partial_dataset_dir(root: Path) -> Path:
+    return root.parent / f".{root.name}.partial"
+
+
+def _discard_incomplete_dataset(root: Path, ds=None, partial: Path | None = None) -> None:
+    """Drop a rollout that did not finish. A directory without its labels sidecar is not a completed run."""
+    if ds is not None:
+        with contextlib.suppress(Exception):
+            ds.finalize()
+    partial = _partial_dataset_dir(root) if partial is None else partial
+    if partial.exists():
+        shutil.rmtree(partial)
+    side = sidecar_path(root)
+    # Labels are written only after the dataset directory is published. A root without them is partial.
+    if root.exists() and not side.is_file():
+        shutil.rmtree(root)
+    if side.exists() and not root.exists():
+        side.unlink()
+
+
 def write_policy_episodes(sources: list[PolicySource], load_policy, env_factory, protocol: Any,
                           max_steps: int, repo_id: str, root: str | Path, fps: int, task: str,
                           shuffle_seed: int, seed_offset: int = 0, source_label: str = "policy",
@@ -620,18 +655,23 @@ def write_policy_episodes(sources: list[PolicySource], load_policy, env_factory,
 
     Peak host memory stays on the order of one episode: frames are not kept on a list of
     PolicyEpisode objects. Dataset order is still the shuffle_seed permutation of collection order
-    (D-021) — episodes are rolled out in that order and appended as they finish.
+    (D-021). Episodes are rolled out in that order, but each episode's torch noise is seeded from
+    its own env seed, so the trajectory does not depend on which episode ran before it.
+    The dataset is published at ``root`` only after every episode and the labels sidecar exist.
+    A failure deletes the partial directory so the same output path can be retried.
     Returned episodes have empty ``cameras``; the frames are in the dataset.
     """
     root = Path(root)
-    if root.exists():
+    if root.exists() and sidecar_path(root).is_file():
         raise FileExistsError(f"{root} exists")
+    _discard_incomplete_dataset(root)
     jobs = _policy_jobs(sources, protocol, seed_offset)
     if not jobs:
         raise ValueError("no episodes to write")
     order = np.random.default_rng(shuffle_seed).permutation(len(jobs))
     loaded: dict[int, Any] = {}
     kept: list[PolicyEpisode] = []
+    partial = _partial_dataset_dir(root)
     ds = None
     cam_keys: list[str] = []
     labels: list[EpisodeLabel] = []
@@ -642,18 +682,26 @@ def write_policy_episodes(sources: list[PolicySource], load_policy, env_factory,
                 loaded[id(src)] = load_policy(src)
             ep = _rollout_one(src, seed, loaded[id(src)], env_factory, max_steps)
             if ds is None:
-                ds, cam_keys = _open_policy_dataset(ep, repo_id, root, fps)
+                partial.parent.mkdir(parents=True, exist_ok=True)
+                ds, cam_keys = _open_policy_dataset(ep, repo_id, partial, fps)
             else:
                 _check_camera_layout(ep, cam_keys, ds.meta.features)
             _append_episode(ds, ep, task, cam_keys)
             labels.append(_episode_label(ep, out_i, source_label))
             kept.append(PolicyEpisode(src, seed, ep.states, ep.actions, ep.success, {}))
             _release_cameras(ep)
-    finally:
         if ds is not None:
             ds.finalize()
-    write_labels(LabelsSidecar(dataset=repo_id, recipe_sha256="policy-source", seed=shuffle_seed, episodes=labels),
-                 sidecar_path(root))
+            ds = None
+        partial.rename(root)
+        write_labels(
+            LabelsSidecar(dataset=repo_id, recipe_sha256="policy-source", seed=shuffle_seed, episodes=labels),
+            sidecar_path(root),
+        )
+    except Exception:
+        with contextlib.suppress(Exception):
+            _discard_incomplete_dataset(root, ds, partial)
+        raise
     return root, kept
 
 

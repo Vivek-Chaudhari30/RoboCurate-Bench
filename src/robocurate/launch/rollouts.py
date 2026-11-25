@@ -114,6 +114,9 @@ def load_pretrained_policy(pretrained_dir: str | Path, *, env_cfg: Any, device: 
         return np.asarray(action, dtype=np.float32).reshape(-1)
 
     def reset() -> None:
+        # Queues only. DiffusionPolicy.reset (modeling_diffusion.py:92) does not reseed, and
+        # select_action noise uses the global torch generator (modeling_diffusion.py:248).
+        # mixture._rollout_one seeds that generator from the env seed before calling this.
         policy.reset()
 
     act.reset = reset  # type: ignore[attr-defined]

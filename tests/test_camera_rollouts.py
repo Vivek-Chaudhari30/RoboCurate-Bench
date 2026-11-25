@@ -202,6 +202,84 @@ def test_device_help_does_not_claim_cuda_visible_devices_selects_it(capsys):
     assert "unless a GPU task sets CUDA_VISIBLE_DEVICES" not in text
 
 
+class _StateEnv:
+    """State only, three steps. Actions are whatever the policy returns."""
+
+    def reset(self, seed=None):
+        self.t = 0
+        self.x = np.zeros(2, np.float32)
+        return self.x.copy(), {}
+
+    def step(self, action):
+        self.t += 1
+        self.x = np.asarray(action, dtype=np.float32).reshape(-1)[:2]
+        return self.x.copy(), 0.0, False, self.t >= 3, {"is_success": False}
+
+
+def _torch_noise_policy(_obs):
+    import torch
+
+    return torch.randn(2).numpy().astype(np.float32)
+
+
+def _write_noise(root, shuffle_seed):
+    srcs = [M.PolicySource("noise", "fake://noise", 1, 2)]
+    return M.write_policy_episodes(
+        srcs, lambda _src: _torch_noise_policy, _StateEnv, PROTO, max_steps=3,
+        repo_id="rcb/noise_order", root=root, fps=10, task="noise", shuffle_seed=shuffle_seed,
+    )
+
+
+def test_episode_actions_do_not_depend_on_rollout_order(tmp_path, scratch_env):
+    """Same env seed, same actions, whether that episode is rolled out first or second."""
+    assert not np.array_equal(
+        np.random.default_rng(0).permutation(2), np.random.default_rng(3).permutation(2),
+    )
+    _, first = _write_noise(tmp_path / "a", shuffle_seed=0)
+    _, second = _write_noise(tmp_path / "b", shuffle_seed=3)
+    by_seed_a = {ep.seed: ep.actions for ep in first}
+    by_seed_b = {ep.seed: ep.actions for ep in second}
+    assert [ep.seed for ep in first] != [ep.seed for ep in second]
+    assert set(by_seed_a) == set(by_seed_b)
+    for seed, actions in by_seed_a.items():
+        np.testing.assert_array_equal(actions, by_seed_b[seed])
+    seeds = list(by_seed_a)
+    assert not np.array_equal(by_seed_a[seeds[0]], by_seed_a[seeds[1]])
+
+
+def test_failed_second_episode_does_not_block_retry(tmp_path, scratch_env, monkeypatch):
+    calls = {"n": 0, "fail": True}
+    real = M._rollout_one
+
+    def wrapped(*args, **kwargs):
+        calls["n"] += 1
+        if calls["fail"] and calls["n"] == 2:
+            raise RuntimeError("episode 2 failed")
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(M, "_rollout_one", wrapped)
+    srcs = [M.PolicySource("p", "fake://p", 1, 2)]
+    root = tmp_path / "out" / "policy"
+    kwargs = dict(
+        sources=srcs, load_policy=lambda _src: (lambda _obs: np.zeros(2, np.float32)),
+        env_factory=_StateEnv, protocol=PROTO,
+        max_steps=3, repo_id="rcb/retry", root=root, fps=10, task="retry", shuffle_seed=0,
+    )
+    with pytest.raises(RuntimeError, match="episode 2 failed"):
+        M.write_policy_episodes(**kwargs)
+    assert not root.exists()
+    assert not sidecar_path(root).exists()
+    assert not (root.parent / f".{root.name}.partial").exists()
+
+    calls["fail"] = False
+    calls["n"] = 0
+    written, kept = M.write_policy_episodes(**kwargs)
+    assert written == root and root.is_dir() and len(kept) == 2
+    assert sidecar_path(root).is_file()
+    with pytest.raises(FileExistsError):
+        M.write_policy_episodes(**kwargs)
+
+
 def test_gpu_phase_script_selects_cuda_for_local(tmp_path):
     script = REPO / "scripts" / "gpu_phase_rollouts.sh"
     text = script.read_text()
