@@ -1,5 +1,34 @@
 # PROGRESS
 
+## 2026-11-25T02:50Z scripted transfer (feat/scripted-transfer)
+
+State-only scripted policy for `gym_aloha/AlohaTransferCube-v0`
+(`src/robocurate/data/scripted_transfer.py`). gym-aloha 0.1.5 raises `NotImplementedError` before
+building `TransferCubeEndEffectorTask` (`env.py:120`); the task class and EE xml are still shipped.
+Waypoints are rolled there, converted to 14-dim joint commands (arm qpos, commanded gripper in place of
+measured gripper qpos), and replayed through `replay_policy_sources` / `collect_policy_episodes`.
+Perturbations are applied only by `PerturbedPolicy` at execution (D-011). No post-hoc action noise.
+The shipped EE weld (`solimp` 0.25) does not track the cube under MuJoCo 3.8; the trajectory generator
+stiffens that weld. `AlohaTransferCube-v0` itself is unchanged. Episode length 400
+(`lerobot/envs/configs.py:152`, overriding the registered 300-step cap).
+
+- **Unperturbed:** 10/10 success on the `scripted_replay` curation seeds (599990–599999). The env ends
+  when reward == 4, before frame 400. Right-gripper joint command is 1.0 at frame 130, 0.9 at 135, 0.475
+  at 152 (the measured close window; the joint command is the previous step's EE gripper command).
+- **Perturbed:** `task_a_v1` jitter (per-episode sigma uniform in [0.173, 0.726]) and gripper_drop
+  (action dim 13 forced to 1.0 from frame 135). Replaying the recorded actions reproduces
+  `observation.state` exactly. Replaying the unperturbed commands does not. Label sidecar: source
+  `scripted`, tier `bad`, defects `jitter` / `gripper_drop`, success flags match the rollouts.
+- **Blocked:** image episodes. `write_policy_dataset` stores `observation.state` and `action` only.
+  `tasks/sim.py:92-94` renders three cameras inside `get_observation`; the state env skips that.
+  `--backend local` still refuses, and the refusal now names the camera writer. No dataset committed.
+- **Commands:** `MUJOCO_GL=egl pytest -q tests/test_scripted_transfer.py` — 4 passed in 9.6s.
+  `ruff check .` clean. `pytest -q -m "not gpu and not slow"` — 264 passed, 2 failed, 1 skipped, 3 errors.
+  The failures (`test_cupid_influence_sign_on_linear_toy`, `test_sanity_cupid` strict XPASS) fail in
+  isolation and do not import this policy (this CPU torch 2.11). The errors are the integration tests
+  with `ROBOCURATE_SCRATCH` unset.
+- **GPU-hours:** 0
+
 ## Status 2026-11-19 (D-026 task, branch m1-core)
 
 Commits on m1-core (pushed): `0003aa3` D-026 test + refusals + tables; `2fec523` D-025 placebo; `cb3a8d2` CUPID

@@ -4,6 +4,8 @@ import pytest
 
 # CPU-only guard for the whole test session (task rule: no GPU use).
 os.environ["CUDA_VISIBLE_DEVICES"] = ""
+# MuJoCo reads this on first import (scripts/env.example.sh). State-only rollouts do not render.
+os.environ.setdefault("MUJOCO_GL", "egl")
 
 # LeRobot resolves HF_LEROBOT_HOME once, at import (lerobot/utils/constants.py:69). Import it here, under the
 # session's real storage env, so a first import inside a `scratch_env` test (which monkeypatches HF_LEROBOT_HOME to a

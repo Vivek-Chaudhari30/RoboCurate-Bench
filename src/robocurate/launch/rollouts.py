@@ -2,9 +2,9 @@
 on CURATION seeds only (top of curation_seed_range, offset per deferred source; data/mixture.py).
 
   --backend fake   dry run: a stub env and stub policies exercise seeds, offsets, labels and the LeRobot writer.
-  --backend local  GPU host. Refuses today with the list of missing pieces (no adapter yet from a LeRobot
-                   checkpoint to an obs -> action callable that records camera frames, no scripted transfer-cube
-                   policy in gym-aloha 0.1.5 / lerobot 0.6.1). Those are GPU-phase prerequisites
+  --backend local  GPU host. Refuses: write_policy_dataset stores state and action only, and ACT
+                   mixtures need camera frames. The scripted transfer policy itself is implemented for
+                   state-only replay (data/scripted_transfer.py). Image episodes stay blocked on the writer
                    (docs/runbook_gpu.md).
 """
 
@@ -55,11 +55,12 @@ def generate(recipe_path: str, out_dir: Path, backend: str, m0_run_dir: str | No
     recipe = M.Recipe.load(recipe_path)
     proto = load_protocol(protocol_path)
     if backend == "local":
-        missing = ["LeRobot checkpoint -> obs/action adapter recording camera frames (rollout writer stores state "
-                   "and action only; ACT/Diffusion mixtures need images)"]
-        if any(x["source"] == "scripted_replay" for x in recipe.deferred_sources):
-            missing.append("a scripted transfer-cube policy (none in gym-aloha 0.1.5 or lerobot 0.6.1)")
-        raise SystemExit("gpu_phase_rollouts: local backend not built yet. Missing: " + "; ".join(missing))
+        raise SystemExit(
+            "gpu_phase_rollouts: local backend not built yet. Missing: camera-frame rollout writer "
+            "(write_policy_dataset stores observation.state and action only; ACT mixtures need images). "
+            "The scripted transfer policy is implemented for state-only replay "
+            "(robocurate.data.scripted_transfer); image episodes are blocked on this writer"
+        )
     report: dict[str, Any] = {"recipe": recipe.name, "recipe_sha256": recipe.sha256, "sources": {}}
     for spec in recipe.deferred_sources:
         off = M.deferred_seed_offset(recipe, spec["name"])
