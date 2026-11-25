@@ -1425,6 +1425,11 @@ Timebox 4 h; used ~1 h. CPU only. Nothing about the entrant was tuned; the toybe
 
 ## Blocked
 
+- **B-008 update (2026-11-25T23:18Z): not reproduced; cleared for the PR #2 merge, root cause not found.** One full
+  `pytest -q -m slow` on CPU at `c316eb9` (Mac, `CUDA_VISIBLE_DEVICES=""`, `PYTORCH_ENABLE_MPS_FALLBACK=0`, tmux,
+  single process; the recorder tests ran before the Task B end-to-end in collection order) finished in 1439 s:
+  23 passed, 1 xfailed, exit 0. `test_task_b_fake_end_to_end` took 331 s, with no stall. If the stall reappears, use the
+  original entry below.
 - **B-008 (2026-11-20T05:45Z, OPEN) — the full slow suite stalls in the Task B fake end-to-end after the recorder tests.**
   - *Symptom.* In the full slow run, `test_task_b_fake_end_to_end` sat in DemInf's prepare for 77+ min at about
     27% CPU. That step took about 5 min in every earlier run (standalone runs and the first full run).
@@ -2116,3 +2121,9 @@ JSON API for checker project metadata.
 
 Commands: `pytest -q -m "not gpu and not slow"`; `ruff check .`
 Outcome: 265 passed, 1 xfailed; ruff clean. GPU-h 0.
+
+## Coordinator merge pass (2026-11-25, CPU only, GPU-h 0)
+
+| UTC | what merged | commands | outcome | GPU-h |
+|---|---|---|---|---|
+| 2026-11-25T23:31Z | PR #7 (`8923391`, CUPID linear-toy fixture). The fixture was cherry-picked onto chore/checker-slice (`8a4b918` -> `c316eb9`, clean). PR #2 (`439e7ed`) publishes the m1-core history that B-008 had kept off main. PR #1 (`dc037f8`, README names D-026 as primary). PR #4 (`9ec1705`, D-008 diagnostic precision/recall). For PRs #1 and #4, main was merged into the branch to clear PROGRESS.md / tests/test_cli_report.py conflicts, keeping both sides. Left open with a reason posted on each PR: #3 (extra direct pins in pyproject, CI install switched to `--no-deps`, conflicts with 43bc944's `[pusht]` extra), #5 (duplicates 50a7c11 recorder; seeds from curation_seed_range, not D-034's generation_seed_range), #6 (duplicates a36b267; no ACT MIT attribution; asserts the pre-D-037 jitter range). | `pytest -q -m "not gpu and not slow"` on chore/checker-slice `c316eb9` , on the merged PR #4 tree and on main `9ec1705`; `pytest -q -m slow` (CPU, `c316eb9`); `ruff check .`; `gh pr merge --merge` (merge commits, no squash) | default: 290 passed + 1 xfailed (c316eb9), 292 passed + 1 xfailed (PR #4 merged tree and main `9ec1705`). slow: 23 passed + 1 xfailed, 1439 s (B-008 not reproduced). ruff clean. PR CI (pull_request) green before each merge: #7 45538318643, #2 45717085146, #1 45720446244, #4 45721431277. No FROZEN, no edits to protocol.yaml or configs/frozen/, CUPID unchanged and disabled, M0 not started. | 0 |
