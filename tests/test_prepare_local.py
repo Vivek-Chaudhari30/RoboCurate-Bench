@@ -86,6 +86,77 @@ def test_missing_resources_are_refused(real_dataset, tmp_path):
             fac(registry.get(name))
 
 
+def test_checkpoint_dir_uses_pretrained_path_not_the_policy_repr():
+    """A loaded policy's str() is its repr. The checkpoint is config.pretrained_path."""
+    from robocurate.curation.rollouts import RolloutError, checkpoint_dir
+
+    class Policy:
+        def __init__(self):
+            self.config = type("Cfg", (), {"pretrained_path": "/ckpt/pretrained_model"})()
+
+        def eval(self):
+            return self
+
+    pol = Policy()
+    assert checkpoint_dir("/ckpt/pretrained_model") == "/ckpt/pretrained_model"
+    assert checkpoint_dir(pol) == "/ckpt/pretrained_model"
+    assert checkpoint_dir(pol) != str(pol)
+    with pytest.raises(RolloutError, match="pretrained_path"):
+        checkpoint_dir(type("Bare", (), {"config": object()})())
+
+
+def test_cli_reference_policy_loader_returns_a_policy(real_dataset, tmp_path, scratch_env, monkeypatch):
+    """--reference-policy must load a policy. `lambda p: str(p)` skips the missing-loader PrepareError and
+    then crashes gradsim_return on policy.eval() (and demo_score rolls that string out)."""
+    from pathlib import Path
+
+    from robocurate.cleaners.entrants.demo_score import DemoScore
+    from robocurate.cli import main
+    from robocurate.curation import rollouts as R
+
+    root, _ = real_dataset
+    ckpt = tmp_path / "pretrained_model"
+    ckpt.mkdir()
+    (ckpt / "config.json").write_text("{}\n")
+    seen = {}
+
+    class Policy:
+        def __init__(self):
+            self.config = type("Cfg", (), {"pretrained_path": str(ckpt)})()
+            self.evaluated = False
+
+        def eval(self):
+            self.evaluated = True
+            return self
+
+    def load_policy(path, env_type, env_task, device):
+        assert Path(path) == ckpt and env_type == "aloha" and env_task == "AlohaTransferCube-v0"
+        assert device == "cpu"
+        return Policy()
+
+    def select(self, view, budget, rng):
+        pol = self.context.reference_policy.load()
+        pol.eval()  # gradsim_return.py:103; a path string has no eval
+        getattr(pol, "policy_family", None)  # gradsim_return.py:49
+        seen["policy"] = pol
+        return sorted(e.episode_index for e in view)[:budget]
+
+    monkeypatch.setattr(R, "load_lerobot_policy", load_policy)
+    monkeypatch.setattr(DemoScore, "select", select)
+    grid, task = tmp_path / "g.yaml", tmp_path / "t.yaml"
+    task.write_text((REPO / "configs/tasks/aloha_transfer_cube.yaml").read_text().replace(
+        "train_dataset: robocurate/task_a_v1", "train_dataset: rcb/local_mix"))
+    grid.write_text(
+        f"name: g\ntask: {task}\nprotocol: {REPO}/configs/protocol.yaml\nbudgets: [0.5]\nconditions:\n"
+        "  - {kind: full}\n  - {kind: random, n_subsets: 3}\n"
+        "  - {kind: cleaner, name: demo_score, version: '1'}\n")
+    assert main(["prepare", str(grid), "--backend", "local", "--dataset-root", str(root),
+                 "--device", "cpu", "--reference-policy", str(ckpt), "--only", "demo_score",
+                 "--selections-dir", str(tmp_path / "sel")]) == 0
+    pol = seen["policy"]
+    assert not isinstance(pol, str) and pol.evaluated and pol.config.pretrained_path == str(ckpt)
+
+
 def test_cli_prepare_local_on_real_dataset(real_dataset, tmp_path, scratch_env, capsys):
     from robocurate.cli import main
 

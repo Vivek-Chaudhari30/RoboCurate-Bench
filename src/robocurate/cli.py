@@ -83,13 +83,16 @@ def cmd_prepare(args) -> int:
             progress = RobometerProgress(plan.task.train_dataset, args.robometer_model, args.robometer_revision,
                                          out / "_robometer" / "progress.parquet", device=args.device)
         rollouts = None
-        if args.reference_policy:  # pragma: no cover - GPU phase (LeRobot checkpoint + sim)
-            from robocurate.curation.rollouts import LeRobotRolloutBackend
+        loader = None
+        if args.reference_policy:
+            from robocurate.curation.rollouts import LeRobotRolloutBackend, reference_policy_loader
 
             rollouts = LeRobotRolloutBackend(plan.task.env_type, plan.task.env_task, device=args.device)
+            # A path string is not a policy: gradsim_return calls policy.eval() and demo_score rolls the
+            # object out (curation/rollouts.py checkpoint_dir). None still raises PrepareError.
+            loader = reference_policy_loader(plan.task.env_type, plan.task.env_task, args.device)
         res = P.LocalResources(root, device=args.device, progress_model=progress, rollout_backend=rollouts,
-                               reference_policy_path=args.reference_policy,
-                               reference_loader=(lambda p: str(p)) if args.reference_policy else None)
+                               reference_policy_path=args.reference_policy, reference_loader=loader)
         factory = P.local_context_factory(plan.protocol, res, out)
     only = set(args.only.split(",")) if args.only else None
     recs = P.prepare_plan(plan, view, out, args.backend, factory, replicate=args.replicate, only=only)
