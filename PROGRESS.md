@@ -1542,3 +1542,7 @@ pytest -q -m "not gpu and not slow"
 - `test_sanity_cupid`: XPASS(strict) in this VM, both with and without the new packages. That test xfailed on the same main CI run. Not changed.
 
 ruff check .: clean. GPU-hours: 0.
+
+| 2026-11-25T02:52Z | Dropped `opencv-python==4.14.0.94`. Kept `opencv-python-headless==4.13.0.92` only (lerobot METADATA:28, `<4.14,>=4.9`). Lock regenerated (`PYTHONNOUSERSITE=1 pip freeze --exclude-editable`); torch lines stay `2.11.0` / `0.26.0` / `0.11.1` without `+cpu`. CI, submit, and the README install the lock with `--no-deps`. | `pytest tests/test_task_b.py::test_pusht_env_reset_render_cpu`; `pytest -q -m "not gpu and not slow"`; `ruff check .` | PushT env test 1 passed on headless cv2 4.13.0. ruff clean. Suite 264 passed, 21 deselected, 2 failed (same pre-existing CUPID failures as 02:39Z). GPU-h 0 |
+
+Why headless: gym-pusht's metadata requires the `opencv-python` distribution, and a dry run of that pin would install `opencv-python==4.14.0.94` next to headless. Both wheels provide `cv2`. PushT's CPU reset/render path does not need the GUI wheel: `gym_pusht/envs/pusht.py:316` is `cv2.resize` and `:323` is `cv2.drawMarker`, both present in headless. The test passed after uninstalling `opencv-python` and reinstalling headless 4.13.0.92. `pip install gym-pusht==0.1.8` without `--no-deps` still reports `Would install opencv-python-4.14.0.94`, so the lock install commands use `--no-deps`. lerobot was not upgraded. trajlens and retake were not added.
