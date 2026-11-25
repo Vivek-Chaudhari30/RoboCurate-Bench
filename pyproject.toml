@@ -16,6 +16,21 @@ dependencies = [
     "pyyaml==6.0.3",
     "matplotlib==3.11.2",
     "scipy==1.18.1",
+    # Task B (D-030). Authorized exact pins inside lerobot's ranges
+    # (METADATA Requires-Dist: diffusers-dep METADATA:92; pusht METADATA:260-262).
+    # The eight packages after diffusers are the only new transitives from
+    # `pip install --dry-run` of these three into the locked env (nothing upgraded).
+    "gym-pusht==0.1.8",
+    "pymunk==6.11.1",
+    "diffusers==0.39.0",
+    "cffi==2.1.1",
+    "importlib_metadata==10.2.0",
+    "lazy-importer==0.1.0",
+    "opencv-python==4.14.0.94",
+    "pycparser==3.12",
+    "pygame==2.6.1",
+    "regex==2026.11.23",
+    "shapely==2.2.0",
 ]
 
 [project.optional-dependencies]

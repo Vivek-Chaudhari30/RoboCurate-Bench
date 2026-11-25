@@ -14,4 +14,4 @@ save_freq: null                       # null -> only the final checkpoint is sav
 notes: >-
   Weighting track not available: LeRobot 0.6.1 RA-BC needs policy.config.chunk_size
   (utils/sample_weighting.py:150-158) and DiffusionConfig has none (horizon / n_action_steps instead).
-  Requires the lerobot[pusht] and diffusers extras (METADATA:92, 260-262), not in requirements.lock.
+  Requires gym-pusht, pymunk, and diffusers, pinned in requirements.lock (METADATA:92, 260-262).

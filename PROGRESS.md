@@ -1513,3 +1513,32 @@ JSON API for checker project metadata.
 - Label diagnostics in the report (precision/recall of each cleaner's kept set vs labels, D-008).
 - Replay-mode defect generation in sim (jitter/gripper drop) to build `bad`-tier episodes.
 - A subset-variance-aware null simulation as a slow test, once open question 1 is decided.
+
+## Pin Task B dependencies (branch chore/pin-task-b)
+
+| UTC | what changed | commands | outcome | GPU-h |
+|---|---|---|---|---|
+| 2026-11-25T02:39Z | pyproject.toml and requirements.lock: gym-pusht 0.1.8, pymunk 6.11.1, diffusers 0.39.0, plus the dry-run transitives only (cffi 2.1.1, importlib_metadata 10.2.0, lazy-importer 0.1.0, opencv-python 4.14.0.94, pycparser 3.12, pygame 2.6.1, regex 2026.11.23, shapely 2.2.0). Nothing upgraded or removed. lerobot stays 0.6.1. trajlens and retake not added. `test_pusht_env_reset_render_cpu` imports gym_pusht and runs (no skip). | see below | PushT env test passed. ruff clean. default suite 264 passed, 21 deselected, 2 failed (pre-existing CUPID; same without these pins) | 0 |
+
+Authorized exact pins (lerobot METADATA Requires-Dist: diffusers-dep line 92 `diffusers>=0.38,<0.40`; pusht lines 260-262 `gym-pusht>=0.1.5,<0.2.0` and `pymunk>=6.6,<7`). Dry run into the locked env (`pip install --dry-run --upgrade-strategy only-if-needed`, CPU torch index + PyPI) printed `Would install` exactly those eleven wheels and no upgrades. `PYTHONNOUSERSITE=1 pip freeze --exclude-editable` (pip 25.3) matched the previous lock plus those eleven lines. Freeze on this CPU index prints `torch==2.11.0+cpu`, `torchvision==0.26.0+cpu`, `torchcodec==0.11.1+cpu`; the committed lock keeps the existing `torch==2.11.0`, `torchvision==0.26.0`, `torchcodec==0.11.1` pins (same versions; the `+cpu` local tag is how that index names the wheel, and `pip install -r requirements.lock` with the CPU index already resolves them).
+
+Commands (clean venv, `PYTHONNOUSERSITE=1`):
+
+```text
+python3 -m venv /tmp/rcb-venv
+/tmp/rcb-venv/bin/python -m pip install --upgrade pip==25.3
+pip install -r requirements.lock --index-url https://download.pytorch.org/whl/cpu --extra-index-url https://pypi.org/simple
+pip install --dry-run gym-pusht==0.1.8 pymunk==6.11.1 diffusers==0.39.0
+pip install gym-pusht==0.1.8 pymunk==6.11.1 diffusers==0.39.0
+pip freeze --exclude-editable
+pip install -e . --no-deps
+ruff check .
+pytest -q -m "not gpu and not slow"
+```
+
+`test_pusht_env_reset_render_cpu`: 1 passed (reset/render, not skipped). Full marker: **264 passed, 21 deselected, 2 failed** in 105 s. Failures, reproduced after uninstalling the eleven new packages (same influence tensors):
+
+- `test_cupid_influence_sign_on_linear_toy`: `tensor(13.0770) > tensor(33.3154)`. Same assertion and same tensors as main CI on `8502d86` (ubuntu-24.04, CPU torch; job 135821536611). Pre-existing on this lock. Not changed.
+- `test_sanity_cupid`: XPASS(strict) in this VM, both with and without the new packages. That test xfailed on the same main CI run. Not changed.
+
+ruff check .: clean. GPU-hours: 0.
