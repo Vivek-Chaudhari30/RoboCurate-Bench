@@ -1518,3 +1518,10 @@ JSON API for checker project metadata.
 | UTC | what changed | commands | outcome | GPU-h |
 |---|---|---|---|---|
 | 2026-11-25T02:41Z | report: per-entrant precision and recall of the cached kept set (`extra.selected_episodes`) joined to one `*.labels.json` sidecar via `data/labels.py`. Positive class `quality_tier` clean; degraded and bad are negative. Written on the selection panel of report.md and leaderboard.json, labelled diagnostic. Confirmatory D-026 test, comparisons, and stats.py unchanged. | `ruff check .`; `pytest -q -m "not gpu and not slow"` (ROBOCURATE_SCRATCH=/tmp/robocurate-scratch) | ruff clean. 265 passed, 1 skipped, 2 failed. Failures are pre-existing and reproduced in isolation, files untouched: `test_sanity_cupid` (strict xpass) and `test_cupid_influence_sign_on_linear_toy` (influence sign, torch 2.11.0 CPU). New tests passed. | 0 |
+
+## CUPID linear-toy fixture (2026-11-25T03:11Z)
+
+`test_cupid_influence_sign_on_linear_toy` no longer uses `MLPPolicy(1, 1, hidden=4)`. That gram matrix `phi.T @ phi` had condition number ~3.2e11, and the influence comparison flipped across BLAS (one runner: `tensor(13.0770) > tensor(33.3154)`). The fixture is now a linear map on a centered full-rank design: good actions are the first state coordinate, bad actions are its negation, and the rollout target matches the good actions. Measured condition number 61.85; influence sums 6.20 > -5.98. CUPID the entrant, its lambda, its disabled status, and the sanity thresholds are unchanged.
+
+Commands: `pytest -q -m "not gpu and not slow"`; `ruff check .`
+Outcome: 265 passed, 1 xfailed; ruff clean. GPU-h 0.
