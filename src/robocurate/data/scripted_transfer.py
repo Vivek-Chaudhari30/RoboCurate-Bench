@@ -24,6 +24,8 @@ left gripper closes at waypoint t=310. gymnasium make() applies the override
 
 from __future__ import annotations
 
+import ctypes.util
+import itertools
 import os
 from dataclasses import dataclass
 
@@ -31,6 +33,10 @@ import numpy as np
 
 # MuJoCo reads this on first import. Rendering is skipped; egl is the task's required backend.
 os.environ.setdefault("MUJOCO_GL", "egl")
+
+# One token per env.reset, unique for the process. Not id(env): a collected env's id can be
+# reused for the next TransferCubeStateEnv, and that env's episode_id is 1 again after reset.
+_RESET_TOKENS = itertools.count(1)
 
 EPISODE_LENGTH = 400
 RIGHT_GRIPPER_DIM = 13  # gym_aloha/constants.py ACTIONS[13] == "right_arm_gripper"
@@ -162,6 +168,7 @@ def _joint_command(obs: dict) -> np.ndarray:
 
 def _roll_ee_joint_actions(cube_pose: np.ndarray) -> np.ndarray:
     """Roll the EE waypoints at this cube pose and return (EPISODE_LENGTH, 14) joint commands."""
+    _prepare_mujoco_import()
     import collections
 
     from dm_control import mujoco
@@ -232,6 +239,24 @@ def scripted_joint_actions(cube_pose: np.ndarray) -> np.ndarray:
     return cached.copy()
 
 
+def new_reset_token() -> int:
+    """Process-unique id for one env.reset. Never reused, unlike id(env)."""
+    return next(_RESET_TOKENS)
+
+
+def _prepare_mujoco_import() -> None:
+    """dm_control loads its GL backend at import (_render/__init__.py:73-90).
+
+    CI sets MUJOCO_GL=egl (.github/workflows/ci.yml). With no libEGL that import raises
+    (OpenGL.raw.EGL). These rollouts never render, so use the no-renderer backend
+    (constants.NO_RENDERER includes 'disable') only when libEGL is absent.
+    """
+    if os.environ.get("MUJOCO_GL", "").lower() != "egl":
+        return
+    if ctypes.util.find_library("EGL") is None:
+        os.environ["MUJOCO_GL"] = "disable"
+
+
 def _skip_camera_renders(task) -> None:
     """Replace task.get_observation so AlohaEnv.step does not render (tasks/sim.py:92-94)."""
 
@@ -256,6 +281,7 @@ class TransferCubeStateEnv:
     """
 
     def __init__(self, max_episode_steps: int = EPISODE_LENGTH):
+        _prepare_mujoco_import()
         import gym_aloha  # noqa: F401  (registers gym_aloha/AlohaTransferCube-v0)
         import gymnasium as gym
 
@@ -270,6 +296,7 @@ class TransferCubeStateEnv:
         self._task = task
         self.cube_pose: np.ndarray | None = None
         self.episode_id = 0
+        self.reset_token = 0
 
     def _qpos(self) -> np.ndarray:
         physics = self._gym.unwrapped._env.physics
@@ -282,6 +309,7 @@ class TransferCubeStateEnv:
             raise RuntimeError(f"transfer-cube env_state should be (7,), got {pose.shape}")
         self.cube_pose = pose
         self.episode_id += 1
+        self.reset_token = new_reset_token()
         return self._qpos(), {"is_success": False}
 
     def step(self, action):
@@ -301,13 +329,16 @@ class EnvSlot:
 class ScriptedTransferPolicy:
     """obs -> 14-dim joint command. The trajectory is fixed by the cube pose of the reset env.
 
-    One instance is reused across episodes. A new (env id, episode_id) regenerates the trajectory.
-    The returned array is a copy; PerturbedPolicy is what mutates the executed action (D-011).
+    One instance is reused across episodes. A new env.reset_token regenerates the trajectory
+    and restarts the step index. The token is not id(env): collect_policy_episodes builds a
+    new env per episode and drops the previous one, and CPython can reuse that id while the
+    new env's episode_id is 1 again. The returned array is a copy; PerturbedPolicy is what
+    mutates the executed action (D-011).
     """
 
     def __init__(self, slot: EnvSlot):
         self._slot = slot
-        self._key: tuple | None = None
+        self._token: int | None = None
         self._actions: np.ndarray | None = None
         self._t = 0
 
@@ -315,11 +346,10 @@ class ScriptedTransferPolicy:
         env = self._slot.env
         if env is None or env.cube_pose is None:
             raise RuntimeError("scripted transfer policy called before the env was reset")
-        key = (id(env), env.episode_id)
-        if key != self._key:
+        if env.reset_token != self._token:
             self._actions = scripted_joint_actions(env.cube_pose)
             self._t = 0
-            self._key = key
+            self._token = env.reset_token
         assert self._actions is not None
         t = min(self._t, len(self._actions) - 1)
         self._t += 1

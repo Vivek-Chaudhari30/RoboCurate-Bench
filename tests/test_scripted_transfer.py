@@ -3,15 +3,20 @@
 Image episodes are not produced here. write_policy_dataset records observation.state and action only.
 """
 
+from types import SimpleNamespace
+
 import numpy as np
 import pytest
 
 from robocurate.config import load_protocol
 from robocurate.data import mixture as M
+from robocurate.data import scripted_transfer as ST
 from robocurate.data.labels import load_labels, sidecar_path
 from robocurate.data.scripted_transfer import (
     EPISODE_LENGTH,
     RIGHT_GRIPPER_DIM,
+    EnvSlot,
+    ScriptedTransferPolicy,
     TransferCubeStateEnv,
     ee_command_sequence,
     quat_from_axis_angle,
@@ -30,6 +35,39 @@ def _scripted_replay():
     spec = next(x for x in recipe.deferred_sources if x["source"] == "scripted_replay")
     offset = M.deferred_seed_offset(recipe, spec["name"])
     return recipe, spec, offset
+
+
+def test_reused_policy_restarts_when_env_id_and_episode_id_collide(monkeypatch):
+    """One policy, one object id, episode_id stays 1. The next call must be the new plan's first step.
+
+    env_factory drops the previous env, so CPython can reuse its id, and a new env's episode_id
+    is 1 after reset. Keying on (id(env), episode_id) then holds the previous plan's last command.
+    """
+
+    def fake_actions(pose):
+        out = np.zeros((4, 14), dtype=np.float64)
+        out[:, 0] = np.arange(4)
+        out[:, 1] = float(np.asarray(pose)[0])
+        return out
+
+    monkeypatch.setattr(ST, "scripted_joint_actions", fake_actions)
+    slot = EnvSlot()
+    policy = ScriptedTransferPolicy(slot)
+    env = SimpleNamespace(cube_pose=np.zeros(7), episode_id=1, reset_token=1)
+    env.cube_pose[0] = 1.0
+    slot.env = env
+    first = [policy(np.zeros(14)) for _ in range(4)]
+    assert first[-1][0] == 3.0 and first[-1][1] == 1.0
+    # Same object (same id) and the same episode_id a freshly reset env would have.
+    env.cube_pose = np.zeros(7)
+    env.cube_pose[0] = 7.0
+    env.episode_id = 1
+    env.reset_token = 2
+    assert id(slot.env) == id(env)
+    second = policy(np.zeros(14))
+    assert second[0] == 0.0
+    assert second[1] == 7.0
+    assert not np.allclose(second, first[-1])
 
 
 def test_right_gripper_command_closes_on_the_published_schedule():

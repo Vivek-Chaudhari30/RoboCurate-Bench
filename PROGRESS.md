@@ -1,5 +1,26 @@
 # PROGRESS
 
+## 2026-11-25T03:10Z scripted episode boundary (feat/scripted-transfer)
+
+`ScriptedTransferPolicy` restarted its joint plan on `(id(env), episode_id)`. `env_factory`
+drops the previous env, CPython can reuse that id, and a new env's `episode_id` is 1 after
+reset, so `_t` stayed past the plan and the next episode repeated the previous last command.
+Each `TransferCubeStateEnv.reset` now takes a process-unique `reset_token` (`itertools.count`);
+the policy keys on that token only. Regression test reuses one policy and one object id with
+`episode_id` held at 1 and checks the next call is the new plan's first step. No action noise.
+GPU-hours 0.
+
+`dm_control` imports its GL backend at import (`_render/__init__.py:73-90`). CI sets
+`MUJOCO_GL=egl` and has no libEGL, which failed the two sim tests on 811851e. When
+`find_library("EGL")` is None the import uses the no-renderer backend (`MUJOCO_GL=disable`);
+these rollouts never render. A disable-backend reset and a missing-libEGL fallback both ran.
+
+- **Commands:** `ruff check .` clean. `MUJOCO_GL=egl pytest -q -m "not gpu and not slow"` —
+  265 passed, 1 skipped, 21 deselected. Still failing, unchanged by this fix: CUPID
+  `test_cupid_influence_sign_on_linear_toy` and strict XPASS `test_sanity_cupid` (torch 2.11 CPU;
+  not tuned, D-029), plus 3 integration errors because `ROBOCURATE_SCRATCH` is unset here.
+  CI's marker also excludes `integration`. GPU-hours 0.
+
 ## 2026-11-25T02:50Z scripted transfer (feat/scripted-transfer)
 
 State-only scripted policy for `gym_aloha/AlohaTransferCube-v0`
