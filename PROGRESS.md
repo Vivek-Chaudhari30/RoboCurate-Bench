@@ -1510,6 +1510,11 @@ JSON API for checker project metadata.
 - A loss(batch) adapter so CUPID can run on LeRobot PreTrainedPolicy (ACT); a reserved seed block for the
   policy-rollout mixture source instead of the top of the curation range.
 - trajlens adapter via an isolated venv CLI (its pyarrow<25 pin conflicts with the core lock).
-- Label diagnostics in the report (precision/recall of each cleaner's kept set vs labels, D-008).
 - Replay-mode defect generation in sim (jitter/gripper drop) to build `bad`-tier episodes.
 - A subset-variance-aware null simulation as a slow test, once open question 1 is decided.
+
+## Label diagnostics (D-008) — 2026-11-25, branch feat/report-precision-recall
+
+| UTC | what changed | commands | outcome | GPU-h |
+|---|---|---|---|---|
+| 2026-11-25T02:41Z | report: per-entrant precision and recall of the cached kept set (`extra.selected_episodes`) joined to one `*.labels.json` sidecar via `data/labels.py`. Positive class `quality_tier` clean; degraded and bad are negative. Written on the selection panel of report.md and leaderboard.json, labelled diagnostic. Confirmatory D-026 test, comparisons, and stats.py unchanged. | `ruff check .`; `pytest -q -m "not gpu and not slow"` (ROBOCURATE_SCRATCH=/tmp/robocurate-scratch) | ruff clean. 265 passed, 1 skipped, 2 failed. Failures are pre-existing and reproduced in isolation, files untouched: `test_sanity_cupid` (strict xpass) and `test_cupid_influence_sign_on_linear_toy` (influence sign, torch 2.11.0 CPU). New tests passed. | 0 |

@@ -350,3 +350,104 @@ def test_balanced_k8_design_is_eligible(tmp_path, scratch_env):
     panels = R._panels(a)
     assert len(panels) == 2 and all(b["result_eligible"] for _, _, b in panels) and a["result_eligible"]
     assert R.INELIGIBLE not in R.render_markdown(a, None, 1)
+
+
+# Episodes 0-3 clean, 4-5 degraded, 6 bad. Kept set {0, 1, 2, 4, 6}: three clean, one degraded, one bad.
+_TOY_KEPT = [0, 1, 2, 4, 6]
+
+
+def _toy_labels(path: Path) -> None:
+    from robocurate.data.labels import EpisodeLabel, LabelsSidecar, write_labels
+
+    tiers = {0: "clean", 1: "clean", 2: "clean", 3: "clean", 4: "degraded", 5: "degraded", 6: "bad"}
+    episodes = [EpisodeLabel(i, "scripted", "toy/src", i, defects=() if tiers[i] == "clean" else ("jitter",),
+                             quality_tier=tiers[i]) for i in range(7)]
+    write_labels(LabelsSidecar("toy/mix", "ab" * 32, 0, episodes), path)
+
+
+def _toy_run(run_id: str, kind: str, seed: int, episodes: list[int], *, name: str | None = None,
+             subset: int | None = None) -> dict:
+    from robocurate.report.stats import wilson_ci
+
+    cond: dict = {"kind": kind}
+    if kind == "cleaner":
+        cond.update(name=name, version="1")
+    pes = [True, False]
+    return results.RunResult(
+        run_id=run_id, spec={"task": "toy", "condition": cond, "budget": 0.5, "subset_index": subset,
+                             "train_seed": seed},
+        kind="fake", git=results.GitInfo("a" * 40, True), configs=[], lerobot_version="0.6.1",
+        command_lines=[["robocurate", "run"]], seeds={"train_seed": seed}, per_episode_success=pes,
+        n_episodes=2, success_rate=0.5, wilson_95ci=list(wilson_ci(1, 2)), checkpoint_step=None,
+        wall_clock_s=0.0, peak_gpu_mem_mb=None, hostname="h", extra={"selected_episodes": episodes},
+    ).to_dict()
+
+
+def test_label_precision_recall_on_toy_sidecar(tmp_path, capsys):
+    """D-008: precision/recall of the cached kept set vs a toy sidecar. Diagnostic only; the D-026 table is untouched.
+
+    Two runs share one kept set, so the counts are the set's, not a pool across runs. A random subset that kept
+    only clean episodes is not an entrant and is not scored. `degraded` and `bad` are both negatives.
+    """
+    from robocurate.data.labels import load_labels
+
+    out = tmp_path / "res"
+    out.mkdir()
+    kept = _TOY_KEPT
+    results.write_atomic(out / f"{'a' * 16}.json", _toy_run("a" * 16, "cleaner", 0, kept, name="keep"))
+    results.write_atomic(out / f"{'b' * 16}.json", _toy_run("b" * 16, "cleaner", 1, list(kept), name="keep"))
+    results.write_atomic(out / f"{'c' * 16}.json", _toy_run("c" * 16, "random", 0, [0, 1, 2, 3], subset=0))
+
+    R.write_report(out, n_boot=20)
+    bare = json.loads((out / "leaderboard.json").read_text())["tasks"][0]["budgets"][0]
+    assert "label_diagnostics" not in bare
+    assert "Label diagnostics" not in (out / "report.md").read_text()
+
+    _toy_labels(out / "toy.labels.json")
+    scores = R.kept_set_scores(kept, load_labels(out / "toy.labels.json"))
+    assert scores["n_true_positive"] == 3 and scores["n_kept"] == 5 and scores["n_positive"] == 4
+    assert scores["precision"] == pytest.approx(3 / 5) and scores["recall"] == pytest.approx(3 / 4)
+    with pytest.raises(R.ReportError, match="absent from the label sidecar"):
+        R.kept_set_scores([0, 99], load_labels(out / "toy.labels.json"))
+
+    assert cli.main(["report", str(out), "--n-boot", "20"]) == 0
+    printed = capsys.readouterr().out
+    lb = json.loads((out / "leaderboard.json").read_text())
+    b = lb["tasks"][0]["budgets"][0]
+    diag = b["label_diagnostics"]
+    assert diag["role"] == "diagnostic" and diag["decision"] == "D-008"
+    assert diag["note"] == R.DIAGNOSTIC_NOTE
+    assert diag["positive_class"] == "clean" and diag["negative_class"] == ["degraded", "bad"]
+    assert diag["labels_file"] == "toy.labels.json" and diag["dataset"] == "toy/mix" and diag["n_labeled"] == 7
+    assert diag["unscored"] == [] and [e["name"] for e in diag["entrants"]] == ["cleaner:keep"]
+    row = diag["entrants"][0]
+    assert row["diagnostic"] is True
+    assert row["n_true_positive"] == 3 and row["n_kept"] == 5 and row["n_positive"] == 4
+    assert row["precision"] == pytest.approx(3 / 5) and row["recall"] == pytest.approx(3 / 4)
+    assert all("precision" not in c and "recall" not in c for c in b["cleaner_vs_placebo"])
+    assert "precision" not in lb["primary_test"] and "D-026" in lb["primary_test"]
+
+    md = (out / "report.md").read_text()
+    head, _, tail = md.partition("**Label diagnostics")
+    assert "precision" not in head and "recall" not in head
+    assert "diagnostic only (D-008); not part of the confirmatory test" in tail
+    assert "| cleaner:keep | 0.600 | 0.750 | 5 | 3 | 4 |" in md
+    assert "precision=0.600 recall=0.750" in printed and "diagnostic only" in printed
+
+    (out / "other.labels.json").write_text((out / "toy.labels.json").read_text())
+    with pytest.raises(R.ReportError, match="multiple label sidecars"):
+        R.write_report(out, n_boot=20)
+
+
+def test_label_diagnostic_omitted_when_kept_sets_disagree(tmp_path):
+    """Runs of one entrant with different cached kept sets get no precision or recall."""
+    out = tmp_path / "res"
+    out.mkdir()
+    results.write_atomic(out / f"{'a' * 16}.json", _toy_run("a" * 16, "cleaner", 0, _TOY_KEPT, name="keep"))
+    results.write_atomic(out / f"{'b' * 16}.json", _toy_run("b" * 16, "cleaner", 1, [0, 1, 2, 3], name="keep"))
+    _toy_labels(out / "toy.labels.json")
+    R.write_report(out, n_boot=20)
+    diag = json.loads((out / "leaderboard.json").read_text())["tasks"][0]["budgets"][0]["label_diagnostics"]
+    assert diag["entrants"] == [] and "disagree" in diag["unscored"][0]["reason"]
+    md = (out / "report.md").read_text()
+    assert "disagree" in md and "diagnostic omitted" in md and "0.600" not in md and "0.750" not in md
