@@ -18,8 +18,11 @@ fast wrong number is worse than no number.
 - **Training runs are the unit.** Each training run contributes one number: the success rate of its final
   checkpoint over ≥ 200 fixed eval rollouts. Rollouts are never pooled across runs (D-002, D-003).
 - **Subset luck is part of the error bar.** A deterministic cleaner picks one subset, and subsets differ in quality.
-  The test's standard error includes the subset-to-subset variance estimated from the placebo subsets, plus the
-  seed variance, with df = K − 1. Holm correction across entrants (D-016, D-019).
+  The primary statistic is the D-026 balanced prediction t-test (`configs/protocol.yaml` `test: d026_balanced`;
+  [pre-registration §3](docs/preregistration.md)):
+  t = (mean_c − mean_p) / sqrt((1 + 1/K) · MS_between / n), df = K − 1, Holm across the entrants of a track.
+  MS_between is n times the variance of the K placebo subset means. Variance components (s_sub, s_seed) are
+  diagnostics only.
 - **Two tracks.**
   - *Selection* entrants choose episodes.
   - *Weighting* entrants (e.g. RA-BC) reweight training samples on the full data. Their placebo is the same
@@ -46,7 +49,7 @@ src/robocurate/
   curation/       prepare cache, rollout service (curation seeds only), reference policy, progress models
   train/ eval/    LeRobot command builders (lerobot-train / lerobot-eval; eval freezes at eval-v1)
   runs/           planner, locked idempotent executor, fake + local backends, oracle, reproduce
-  report/         statistics (D-016/D-019), report.md, plot, static leaderboard site
+  report/         statistics (D-026 primary; D-016/D-019 diagnostics), report.md, plot, static leaderboard site
 ```
 
 Entrants:
