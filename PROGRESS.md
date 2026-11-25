@@ -1513,3 +1513,10 @@ JSON API for checker project metadata.
 - Label diagnostics in the report (precision/recall of each cleaner's kept set vs labels, D-008).
 - Replay-mode defect generation in sim (jitter/gripper drop) to build `bad`-tier episodes.
 - A subset-variance-aware null simulation as a slow test, once open question 1 is decided.
+
+## CUPID linear-toy fixture (2026-11-25T03:11Z)
+
+`test_cupid_influence_sign_on_linear_toy` no longer uses `MLPPolicy(1, 1, hidden=4)`. That gram matrix `phi.T @ phi` had condition number ~3.2e11, and the influence comparison flipped across BLAS (one runner: `tensor(13.0770) > tensor(33.3154)`). The fixture is now a linear map on a centered full-rank design: good actions are the first state coordinate, bad actions are its negation, and the rollout target matches the good actions. Measured condition number 61.85; influence sums 6.20 > -5.98. CUPID the entrant, its lambda, its disabled status, and the sanity thresholds are unchanged.
+
+Commands: `pytest -q -m "not gpu and not slow"`; `ruff check .`
+Outcome: 265 passed, 1 xfailed; ruff clean. GPU-h 0.
