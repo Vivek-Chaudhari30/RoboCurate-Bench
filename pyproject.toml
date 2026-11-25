@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=69", "wheel"]
+requires = ["setuptools>=77", "wheel"]  # >= 77: SPDX `license` string (PEP 639)
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -8,7 +8,8 @@ version = "0.0.1"
 description = "Placebo-controlled benchmark for robot-data cleaners (episode filters) in simulation."
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
-license = { text = "Apache-2.0" }
+license = "Apache-2.0"  # D-038
+license-files = ["LICENSE"]
 dependencies = [
     # Exact pin (D-001). Extras: aloha = ALOHA sim env (gym-aloha); training/evaluation
     # are needed for `lerobot-train --help` / `lerobot-eval --help` (flag-existence test).
@@ -30,6 +31,17 @@ checkers = [
     "kinema==0.1.0",
     "roboaudit==0.3.1",
     "robot-data-audit @ git+https://github.com/liesliy/rda@47c69459e201cdc1f509f84b027c2407ab949e30",
+]
+
+# Task B (D-030): LeRobot's `pusht` extra (METADATA:260-262: gym-pusht >=0.1.5,<0.2.0, pymunk >=6.6,<7) and diffusers
+# for Diffusion Policy (METADATA:92: >=0.38,<0.40), pinned to the versions that passed the D-030 checks.
+# opencv-python is gym-pusht's requirement; pinned to the SAME version as the locked opencv-python-headless
+# (4.13.0.92; lerobot needs <4.14) because both distributions ship the `cv2` package.
+pusht = [
+    "gym-pusht==0.1.8",
+    "pymunk==6.11.1",
+    "diffusers==0.39.0",
+    "opencv-python==4.13.0.92",
 ]
 
 [project.scripts]

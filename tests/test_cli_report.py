@@ -350,3 +350,23 @@ def test_balanced_k8_design_is_eligible(tmp_path, scratch_env):
     panels = R._panels(a)
     assert len(panels) == 2 and all(b["result_eligible"] for _, _, b in panels) and a["result_eligible"]
     assert R.INELIGIBLE not in R.render_markdown(a, None, 1)
+
+
+def test_family_enablement_refuses_gradsim_in_act_grids(tmp_path):
+    """D-036: gradsim-return is enabled for diffusion only; an ACT grid listing it is refused."""
+    from robocurate.cleaners.registry import disabled_reason
+    from robocurate.config import ConfigError
+    from robocurate.runs.planner import make_plan
+
+    assert disabled_reason("gradsim_return", "diffusion") is None
+    assert "not enabled for policy family 'act'" in disabled_reason("gradsim_return", "act")
+    assert disabled_reason("cupid", "diffusion").startswith("disabled")
+    g = (REPO / "configs/grids/task_a_v1.yaml").read_text().replace(
+        '  - {kind: cleaner, name: deminf, version: "1"}',
+        '  - {kind: cleaner, name: deminf, version: "1"}\n  - {kind: cleaner, name: gradsim_return, version: "1"}')
+    g = g.replace("task: configs/", f"task: {REPO}/configs/")
+    g = g.replace("protocol: configs/", f"protocol: {REPO}/configs/")
+    (tmp_path / "g.yaml").write_text(g)
+    with pytest.raises(ConfigError, match="not enabled for policy family 'act'"):
+        make_plan(str(tmp_path / "g.yaml"))
+    make_plan(str(REPO / "configs/grids/pusht_diffusion_v0.yaml"))  # diffusion grid with gradsim_return plans

@@ -61,17 +61,35 @@ def test_training_is_seed_deterministic(tmp_path):
     assert all(abs(x - y) <= 1e-3 * max(abs(x), 1e-6) for x, y in zip(a, b, strict=True)), (a, b)
 
 
-def test_eval_is_batch_invariant(tmp_path):
-    """D-017: per-episode outcomes must not depend on the eval batch size (env seed = --seed + i)."""
-    cal, task, proto = _need()
+def _eval(task, proto, batch, out):
     from robocurate.eval.lerobot_eval import build_eval_cmd, parse_eval_info
 
-    got = {}
-    for b in (5, 25):
-        cmd = build_eval_cmd(Path(os.environ["RCB_GPU_TEST_CKPT"]), 25, int(proto.calibration_seed_start), b,
-                             env_type=task.env_type, env_task=task.env_task, output_dir=tmp_path / f"e{b}")
-        p = subprocess.run([_exe(cmd[0]), *cmd[1:]], capture_output=True, text=True)
-        assert p.returncode == 0, p.stderr[-2000:]
-        got[b] = parse_eval_info(tmp_path / f"e{b}", 25)
+    cmd = build_eval_cmd(Path(os.environ["RCB_GPU_TEST_CKPT"]), 25, int(proto.calibration_seed_start), batch,
+                         env_type=task.env_type, env_task=task.env_task, output_dir=out)
+    p = subprocess.run([_exe(cmd[0]), *cmd[1:]], capture_output=True, text=True)
+    assert p.returncode == 0, p.stderr[-2000:]
+    return parse_eval_info(out, 25)
+
+
+def test_eval_is_batch_invariant(tmp_path):
+    """D-017 (ACT tasks): per-episode outcomes must not depend on the eval batch size (env seed = --seed + i)."""
+    cal, task, proto = _need()
+    if task.policy_type == "diffusion":
+        pytest.skip("D-035: diffusion samples noise at eval; batch invariance is not required (fixed batch instead)")
+    got = {b: _eval(task, proto, b, tmp_path / f"e{b}") for b in (5, 25)}
     assert got[5] == got[25], json.dumps(got)
+
+
+def test_eval_is_deterministic_at_the_protocol_batch(tmp_path):
+    """D-035 (diffusion tasks): two evals at the protocol-fixed eval batch size give identical per-episode
+    outcomes (protocol.yaml eval_batch_size.<task>, written by launch-kit stage d)."""
+    cal, task, proto = _need()
+    if task.policy_type != "diffusion":
+        pytest.skip("ACT tasks are covered by test_eval_is_batch_invariant")
+    b = proto.task_eval_batch_size(task.name)
+    from robocurate.config import is_tbd
+
+    assert b is not None and not is_tbd(b), "stage d must write eval_batch_size.<task> before stage c checks it"
+    a1, a2 = _eval(task, proto, int(b), tmp_path / "r1"), _eval(task, proto, int(b), tmp_path / "r2")
+    assert a1 == a2, json.dumps({"run1": a1, "run2": a2})
 
